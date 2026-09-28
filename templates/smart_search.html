@@ -15,6 +15,22 @@
   </div>
   {% endif %}
 </section>
+<details id="discord" class="panel mb-4">
+  <summary class="fw-semibold">Using Smart Search with Discord</summary>
+  <div class="pt-3">
+    <p>Prefer searching from the couch? MyCouch can bring <strong>Smart Search directly into Discord</strong>.</p>
+    <p>Once Discord integration has been configured by your MyCouch administrator, use the <code>/search</code> command in Discord followed by what you're looking for.</p>
+    <p>Smart Search understands natural language, so you don't need to know the exact title. For example:</p>
+    <ul>
+      <li><code>/search funny movie from the 90s</code></li>
+      <li><code>/search sci-fi movies</code></li>
+      <li><code>/search something with Tom Hanks</code></li>
+      <li><code>/search short movie for tonight</code></li>
+    </ul>
+    <p>MyCouch searches your Plex library and returns matching titles directly in Discord, making it easy to find something to watch without opening MyCouch.</p>
+    <p class="mb-0"><strong>No Plex password or MyCouch login is required to use <code>/search</code> in Discord.</strong> Access is controlled through your Discord server.</p>
+  </div>
+</details>
 {% if q %}<section class="panel"><h4>Results for “{{q}}”</h4><div class="row g-3 mt-1">
 {% for x in results %}<div class="col-md-6 col-xl-4"><div class="card h-100 smart-card"><div class="row g-0 h-100"><div class="col-4 smart-poster-wrap"><img src="{{ url_for('smart_search_poster', item_id=x.metadata_id) }}" class="smart-poster" loading="lazy" alt="{{x.title}} poster" onerror="this.style.display='none';this.nextElementSibling.style.display='flex'"><div class="smart-poster-fallback" style="display:none">No poster</div></div><div class="col-8"><div class="card-body d-flex flex-column h-100"><h5 class="mb-1"><a href="/movie/{{x.metadata_id}}">{{x.title}}</a>{% if x.year %} <span class="text-muted">({{x.year}})</span>{% endif %}</h5>{% if x.genres_display %}<div class="small text-secondary mb-2">{{x.genres_display}}</div>{% endif %}<div class="mb-2"><span class="badge text-bg-info">{{x.match_label}}</span></div><p class="smart-summary mb-3">{{x.summary or 'No Plex summary available.'}}</p><div class="mt-auto d-flex gap-2 flex-wrap"><a class="btn btn-sm btn-outline-light" href="/movie/{{x.metadata_id}}">Details</a>{% if x.plex_url %}<a class="btn btn-sm btn-warning" href="{{x.plex_url}}" target="_blank" rel="noopener">▶ Open in Plex</a>{% endif %}</div></div></div></div></div></div>{% else %}<div class="col-12 text-muted">No useful matches found. Try describing the plot with a few different concepts.</div>{% endfor %}
 </div></section>{% endif %}<script>

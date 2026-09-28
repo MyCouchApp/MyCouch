@@ -1,5 +1,5 @@
 {% extends 'base.html' %}{% block content %}
-<div class="page-head"><div><h1>Cleanup</h1><p class="muted">Storage and cleanup analysis · based on cache refreshed {{cache.refreshed_at or "never"}}</p></div></div>
+<div class="page-head"><div><h1>Server Stats</h1><p class="muted">Library, storage and cleanup analysis · based on cache refreshed {{cache.refreshed_at or "never"}}</p></div></div>
 <div class="row g-3 mb-4">
   <div class="col-md-6 col-xl-3"><a class="metric warning" href="/tv?filter=old_unwatched"><span>Old never-watched TV</span><strong>{{'%.2f'|format(old_tv|sum(attribute='size_gb')/1024)}} TB</strong><small>{{old_tv|length}} shows · 3+ years</small></a></div>
   <div class="col-md-6 col-xl-3"><a class="metric info" href="/movies?filter=large720"><span>Large 720p H.264</span><strong>{{'%.2f'|format(large720|sum(attribute='size_gb')/1024)}} TB</strong><small>{{large720|length}} movie files</small></a></div>

@@ -6,7 +6,7 @@ MyCouch is a self-hosted companion for exploring and understanding a Plex media 
 
 > MyCouch is an independent project and is not affiliated with Plex, Tautulli, Radarr, Sonarr, Discord, Emby or Jellyfin.
 
-## Current release — v2.9.7
+## Current release — v2.9.8
 
 This release renames **LibraryLens** to **MyCouch** while preserving the existing database format and upgrade path.
 

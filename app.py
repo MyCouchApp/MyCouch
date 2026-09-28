@@ -1725,6 +1725,7 @@ def leaving_soon_settings():
 @app.get('/changelog')
 def changelog():
     versions = [
+        ('v2.9.8', 'UI and navigation update: reordered the main menu, renamed Cleanup to Server Stats, added a collapsible linked MyCouch introduction to the Dashboard, and documented Discord /search directly on Smart Search.'),
         ('v2.9.7', 'Renamed LibraryLens to MyCouch. Added GitHub-ready project hygiene, removed machine-specific defaults, refreshed documentation and branding, and renamed the dashboard Now Playing section to “What’s Playing on MyCouch?”. Existing auditor.db, auditor-cache.db and .pla-secret files remain compatible.'),
         ('v2.9.6.2', 'Fixed natural title sorting for Unicode numeric characters such as superscript ² by treating only ASCII 0–9 groups as numeric sort tokens.'),
         ('v2.9.6.1', 'Fixed SQLite sorting failure caused by the NATURAL collation name being parsed as SQL syntax; the custom collation is now quoted correctly.'),
