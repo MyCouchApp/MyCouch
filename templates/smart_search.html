@@ -1,0 +1,63 @@
+{% extends 'base.html' %}{% block content %}
+<div class="page-head"><div><h1>Smart Search</h1><p class="muted">Describe the movie you want instead of remembering its title.</p></div></div>
+<section class="panel mb-4">
+  <form method="get" action="{{ url_for('smart_search') }}" id="smart-search-form"><div class="input-group input-group-lg"><input autofocus class="form-control" name="q" value="{{q}}" placeholder="man stuck in wilderness and struggles to get home"><button class="btn btn-primary" id="smart-search-button" type="submit">Search</button></div>
+  <div id="smart-search-progress" class="mt-3 d-none" aria-live="polite">
+    <div class="d-flex justify-content-between small mb-1"><span>Searching your Plex library…</span><span class="text-secondary">Working</span></div>
+    <div class="progress" role="progressbar" aria-label="Smart Search in progress"><div class="progress-bar progress-bar-striped progress-bar-animated smart-search-indeterminate" style="width:100%"></div></div>
+  </div></form>
+  {% if search_history %}
+  <div class="mt-3 d-flex align-items-start justify-content-between gap-3 flex-wrap">
+    <div><div class="small text-secondary mb-2">Recent searches</div><div class="d-flex gap-2 flex-wrap">
+      {% for h in search_history %}<button type="button" class="btn btn-sm btn-outline-secondary smart-search-history" data-query="{{ h.query|e }}">{{h.query}}</button>{% endfor %}
+    </div></div>
+    {% if is_admin() %}<form method="post" action="{{ url_for('smart_search_history_clear') }}" onsubmit="return confirm('Clear Smart Search history?')"><input type="hidden" name="_csrf" value="{{ csrf_token() }}"><button class="btn btn-sm btn-outline-danger">Clear history</button></form>{% endif %}
+  </div>
+  {% endif %}
+</section>
+{% if q %}<section class="panel"><h4>Results for “{{q}}”</h4><div class="row g-3 mt-1">
+{% for x in results %}<div class="col-md-6 col-xl-4"><div class="card h-100 smart-card"><div class="row g-0 h-100"><div class="col-4 smart-poster-wrap"><img src="{{ url_for('smart_search_poster', item_id=x.metadata_id) }}" class="smart-poster" loading="lazy" alt="{{x.title}} poster" onerror="this.style.display='none';this.nextElementSibling.style.display='flex'"><div class="smart-poster-fallback" style="display:none">No poster</div></div><div class="col-8"><div class="card-body d-flex flex-column h-100"><h5 class="mb-1"><a href="/movie/{{x.metadata_id}}">{{x.title}}</a>{% if x.year %} <span class="text-muted">({{x.year}})</span>{% endif %}</h5>{% if x.genres_display %}<div class="small text-secondary mb-2">{{x.genres_display}}</div>{% endif %}<div class="mb-2"><span class="badge text-bg-info">{{x.match_label}}</span></div><p class="smart-summary mb-3">{{x.summary or 'No Plex summary available.'}}</p><div class="mt-auto d-flex gap-2 flex-wrap"><a class="btn btn-sm btn-outline-light" href="/movie/{{x.metadata_id}}">Details</a>{% if x.plex_url %}<a class="btn btn-sm btn-warning" href="{{x.plex_url}}" target="_blank" rel="noopener">▶ Open in Plex</a>{% endif %}</div></div></div></div></div></div>{% else %}<div class="col-12 text-muted">No useful matches found. Try describing the plot with a few different concepts.</div>{% endfor %}
+</div></section>{% endif %}<script>
+(function(){
+  const form=document.getElementById('smart-search-form');
+  if(!form) return;
+  const input=form.querySelector('input[name="q"]');
+  const button=document.getElementById('smart-search-button');
+  const progress=document.getElementById('smart-search-progress');
+
+  async function runSearch(query){
+    query=String(query||'').trim();
+    if(!query) return;
+    if(input) input.value=query;
+    if(button){button.disabled=true;button.textContent='Searching…';}
+    if(progress) progress.classList.remove('d-none');
+    // Always build from the clean Smart Search path. Never append to the
+    // current URL, which may already contain an old ?q= query string.
+    const url=new URL(form.action,window.location.origin);
+    url.searchParams.set('q',query);
+    try{
+      const response=await fetch(url.toString(),{credentials:'same-origin',cache:'no-store'});
+      if(!response.ok) throw new Error('Search failed: '+response.status);
+      const html=await response.text();
+      history.pushState({},'',url.pathname+url.search);
+      document.open(); document.write(html); document.close();
+    }catch(err){
+      if(button){button.disabled=false;button.textContent='Search';}
+      if(progress) progress.classList.add('d-none');
+      alert('Smart Search failed. Please try again.');
+    }
+  }
+
+  form.addEventListener('submit',function(ev){
+    ev.preventDefault();
+    runSearch(input ? input.value : '');
+  });
+
+  document.querySelectorAll('.smart-search-history').forEach(function(historyButton){
+    historyButton.addEventListener('click',function(){
+      runSearch(historyButton.dataset.query||'');
+    });
+  });
+})();
+</script>
+{% endblock %}

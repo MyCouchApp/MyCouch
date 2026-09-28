@@ -1,0 +1,30 @@
+# MyCouch runtime / secrets
+auditor.db
+auditor.db-*
+auditor-cache.db
+auditor-cache.db-*
+.pla-secret
+.mycouch-secret
+*.db-wal
+*.db-shm
+plex-snapshot-*
+backups/
+*.log
+
+# Python
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+
+# Editors / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# Local environment/config
+.env
+.env.*
+!.env.example

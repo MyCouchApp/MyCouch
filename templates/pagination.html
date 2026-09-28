@@ -1,0 +1,3 @@
+{% macro pager(page,pages,per_page,filt,qterm,sort,dir) -%}
+{% if pages > 1 %}<nav class="d-flex justify-content-between align-items-center mt-3"><div class="muted">Page {{page}} of {{pages}}</div><div class="btn-group"><a class="btn btn-outline-secondary {% if page<=1 %}disabled{% endif %}" href="?q={{qterm|urlencode}}&filter={{filt}}&sort={{sort}}&dir={{dir}}&per_page={{per_page}}&page={{page-1}}">← Previous</a><a class="btn btn-outline-secondary {% if page>=pages %}disabled{% endif %}" href="?q={{qterm|urlencode}}&filter={{filt}}&sort={{sort}}&dir={{dir}}&per_page={{per_page}}&page={{page+1}}">Next →</a></div></nav>{% endif %}
+{%- endmacro %}

@@ -1,0 +1,209 @@
+{% extends 'base.html' %}{% block content %}
+<h2>Settings</h2>
+<div class="card p-3 mb-4">
+  <div class="d-flex justify-content-between align-items-center gap-3">
+    <div><h5 class="mb-1">Local library cache</h5><p class="text-muted mb-0">{% if cache %}Last refreshed: <b>{{cache.refreshed_at}}</b><br>{{cache.movie_files}} movie files · {{cache.tv_shows}} TV shows · {{cache.episodes}} episodes{% else %}Not built yet.{% endif %}</p></div>
+    <form method="post" action="/refresh-cache" id="refreshForm"><input type="hidden" name="_csrf" value="{{csrf_token()}}"><button class="btn btn-success" type="submit" id="refreshBtn">Update Plex Now</button></form>
+  </div>
+  <div id="buildPanel" class="build-panel mt-3 d-none">
+    <div class="d-flex justify-content-between"><strong id="buildStage">Starting…</strong><span id="buildPct">0%</span></div>
+    <div class="progress mt-2" role="progressbar"><div id="buildBar" class="progress-bar progress-bar-striped progress-bar-animated" style="width:0%"></div></div>
+    <div class="d-flex justify-content-between mt-2 small text-muted"><span id="buildMessage">Preparing cache build…</span><span>Elapsed: <span id="buildElapsed">00:00</span></span></div>
+  </div>
+  <small class="text-muted mt-2">Refresh creates a consistent SQLite snapshot of the selected Plex database (including a live Plex DB), then atomically rebuilds auditor-cache.db. The current cache stays intact if refresh fails.</small>
+</div>
+
+<div class="card p-3 mb-4"><h5>Plex connection for Discord</h5><p class="text-muted">Optional. Enables poster thumbnails and token-free <b>Open in Plex</b> links in title-based Discord posts. The Plex token stays in local <code>auditor.db</code> and is never placed in Discord URLs.</p><form method="post" action="/plex/connection" class="row g-3"><input type="hidden" name="_csrf" value="{{csrf_token()}}"><div class="col-md-6"><label class="form-label">Plex URL</label><input class="form-control" name="plex_url" value="{{plex_connection.url}}"></div><div class="col-md-6"><label class="form-label">Plex token</label><input class="form-control" type="password" name="plex_token" placeholder="{{'Saved — leave blank to keep' if plex_connection.token else 'Enter locally'}}"></div><div class="col-12"><button class="btn btn-primary">Save & Test Plex</button> <span class="small text-muted ms-2">Server identity: {{'Detected ✓' if plex_connection.machine else 'Not detected'}}</span></div></form></div>
+
+<div class="card p-3 mb-4"><h5>Plex automatic updates</h5><p class="text-muted">Use the live Plex database safely: each update snapshots SQLite first, then rebuilds the Auditor cache. The website never browses the active Plex DB directly.</p><form method="post" action="/plex/schedule" class="row g-3 align-items-end"><input type="hidden" name="_csrf" value="{{csrf_token()}}"><div class="col-md-3"><div class="form-check form-switch mt-4"><input class="form-check-input" type="checkbox" name="enabled" value="1" id="plexAuto" {% if plex_update.enabled %}checked{% endif %}><label class="form-check-label" for="plexAuto">Enable automatic updates</label></div></div><div class="col-md-3"><label class="form-label">Frequency</label><select class="form-select" name="frequency"><option value="daily" {% if plex_update.frequency=='daily' %}selected{% endif %}>Daily</option><option value="6h" {% if plex_update.frequency=='6h' %}selected{% endif %}>Every 6 hours</option><option value="12h" {% if plex_update.frequency=='12h' %}selected{% endif %}>Every 12 hours</option></select></div><div class="col-md-3"><label class="form-label">Daily time</label><input class="form-control" type="time" name="time" value="{{plex_update.time}}"></div><div class="col-md-3"><button class="btn btn-primary w-100">Save schedule</button></div></form></div>
+
+<div class="card p-3 mb-4">
+  <div class="d-flex justify-content-between align-items-center gap-3">
+    <div class="flex-grow-1 overflow-hidden">
+      <h5>Plex database</h5>
+      <div class="text-muted small">Currently selected</div>
+      <div class="font-monospace text-truncate" title="{{db}}">{{db}}</div>
+    </div>
+    <button class="btn btn-primary text-nowrap" type="button" data-bs-toggle="modal" data-bs-target="#dbPicker" onclick="loadDatabases()">Choose Database…</button>
+  </div><div class="d-flex gap-2 mt-3"><form method="post" action="/plex/use-live-db"><input type="hidden" name="_csrf" value="{{csrf_token()}}"><button class="btn btn-outline-success">Use Live Plex DB</button></form><span class="small text-muted align-self-center">Auto-detects the database used by Plex Media Server under this Windows account.</span></div>
+</div>
+
+<div class="modal fade" id="dbPicker" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog modal-lg modal-dialog-scrollable"><div class="modal-content bg-dark text-light">
+    <div class="modal-header"><div><h5 class="modal-title">Choose Plex database</h5><div id="dbFolder" class="small text-muted font-monospace"></div></div><button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button></div>
+    <div class="modal-body p-0">
+      <div id="dbLoading" class="p-4 text-center text-muted">Looking for Plex database backups…</div>
+      <div id="dbError" class="alert alert-danger m-3 d-none"></div>
+      <div id="dbList" class="list-group list-group-flush"></div>
+    </div>
+    <div class="modal-footer"><button class="btn btn-outline-light" data-bs-dismiss="modal">Cancel</button></div>
+  </div></div>
+</div>
+<form method="post" action="/settings" id="dbSelectForm"><input type="hidden" name="_csrf" value="{{csrf_token()}}"><input type="hidden" name="plex_db" id="selectedDb"></form>
+
+<div class="card p-3 mb-4">
+  <h5>Radarr / Sonarr integrations</h5>
+  <p class="text-muted">Read-only matching. API keys are saved only in this app's local <code>auditor.db</code>. No delete, unmonitor or search actions are enabled.</p>
+  <form method="post" action="/integrations/save" class="row g-3"><input type="hidden" name="_csrf" value="{{csrf_token()}}">
+    <div class="col-md-6"><label class="form-label">Radarr URL</label><input class="form-control" name="radarr_url" value="{{integrations.radarr_url}}"><label class="form-label mt-2">Radarr API key</label><input class="form-control" type="password" name="radarr_api_key" placeholder="{{'Saved — leave blank to keep' if integrations.radarr_key else 'Enter locally'}}"></div>
+    <div class="col-md-6"><label class="form-label">Sonarr URL</label><input class="form-control" name="sonarr_url" value="{{integrations.sonarr_url}}"><label class="form-label mt-2">Sonarr API key</label><input class="form-control" type="password" name="sonarr_api_key" placeholder="{{'Saved — leave blank to keep' if integrations.sonarr_key else 'Enter locally'}}"></div>
+    <div class="col-12"><button class="btn btn-primary">Save integration settings</button></div>
+  </form>
+  <div class="d-flex flex-wrap gap-2 mt-3">
+    <form method="post" action="/integrations/test/radarr"><input type="hidden" name="_csrf" value="{{csrf_token()}}"><button class="btn btn-outline-light" {% if not integrations.radarr_key %}disabled{% endif %}>Test Radarr</button></form>
+    <form method="post" action="/integrations/test/sonarr"><input type="hidden" name="_csrf" value="{{csrf_token()}}"><button class="btn btn-outline-light" {% if not integrations.sonarr_key %}disabled{% endif %}>Test Sonarr</button></form>
+    <form method="post" action="/integrations/sync"><input type="hidden" name="_csrf" value="{{csrf_token()}}"><button class="btn btn-success" {% if not integrations.radarr_key or not integrations.sonarr_key or not cache %}disabled{% endif %}>Match Plex ↔ Arr</button></form>
+  </div>
+  <div id="arrPanel" class="build-panel mt-3 d-none">
+    <div class="d-flex justify-content-between"><strong id="arrStage">Starting…</strong><span id="arrPct">0%</span></div>
+    <div class="progress mt-2" role="progressbar"><div id="arrBar" class="progress-bar progress-bar-striped progress-bar-animated" style="width:0%"></div></div>
+    <div class="d-flex justify-content-between mt-2 small text-muted"><span id="arrMessage">Preparing Arr match…</span><span>Elapsed: <span id="arrElapsed">00:00</span></span></div>
+    <div class="small mt-2" id="arrResults"></div>
+  </div>
+  <div class="small text-muted mt-3">Cached matches: {{integrations.movie_matches}} movies · {{integrations.tv_matches}} TV shows. Matching uses exact media paths only; it will show Unmatched rather than guess by title.</div>
+</div>
+
+
+<div class="card p-3 mb-4">
+  <h5>Tautulli activity</h5>
+  <p class="text-muted">Uses Tautulli history across <b>all Plex users</b>. This becomes the useful activity signal for cleanup decisions; the original Plex watched flag is retained only for reference.</p>
+  <form method="post" action="/tautulli/save" class="row g-3"><input type="hidden" name="_csrf" value="{{csrf_token()}}">
+    <div class="col-md-6"><label class="form-label">Tautulli URL</label><input class="form-control" name="tautulli_url" value="{{tautulli.url}}"></div>
+    <div class="col-md-6"><label class="form-label">Tautulli API key</label><input class="form-control" type="password" name="tautulli_api_key" placeholder="{{'Saved — leave blank to keep' if tautulli.key else 'Enter locally'}}"></div>
+    <div class="col-12"><button class="btn btn-primary">Save Tautulli settings</button></div>
+  </form>
+  <div class="d-flex flex-wrap gap-2 mt-3">
+    <form method="post" action="/tautulli/test"><input type="hidden" name="_csrf" value="{{csrf_token()}}"><button class="btn btn-outline-light" {% if not tautulli.key %}disabled{% endif %}>Test Tautulli</button></form>
+    <form method="post" action="/tautulli/sync"><input type="hidden" name="_csrf" value="{{csrf_token()}}"><button class="btn btn-success" {% if not tautulli.key %}disabled{% endif %}>Update Now</button></form>
+    <form method="post" action="/tautulli/full-rescan" onsubmit="return confirm('Full Rescan rebuilds the complete local Tautulli history cache. Continue?')"><input type="hidden" name="_csrf" value="{{csrf_token()}}"><button class="btn btn-outline-warning" {% if not tautulli.key %}disabled{% endif %}>Full Rescan</button></form>
+  </div>
+  <div id="tautulliPanel" class="build-panel mt-3 d-none">
+    <div class="d-flex justify-content-between"><strong id="tautulliStage">Starting…</strong><span id="tautulliPct">0%</span></div>
+    <div class="progress mt-2"><div id="tautulliBar" class="progress-bar progress-bar-striped progress-bar-animated" style="width:0%"></div></div>
+    <div class="d-flex justify-content-between mt-2 small text-muted"><span id="tautulliMessage">Preparing history sync…</span><span>Elapsed: <span id="tautulliElapsed">00:00</span></span></div>
+  </div>
+  <div class="small text-muted mt-3">Viewing activity: <b>{{ 'Tautulli ✓' if tautulli.authoritative else 'Waiting for first v2.7 full rescan' }}</b> · Last sync: {{tautulli.last_sync}} · cached activity for {{tautulli.items}} Plex items.</div>
+  <hr class="border-secondary my-4">
+  <h6>Automatic incremental updates</h6>
+  <form method="post" action="/tautulli/schedule" class="row g-3 align-items-end"><input type="hidden" name="_csrf" value="{{csrf_token()}}">
+    <div class="col-md-3"><div class="form-check form-switch mt-4"><input class="form-check-input" type="checkbox" name="enabled" value="1" id="autoT" {% if tautulli.auto_enabled %}checked{% endif %}><label class="form-check-label" for="autoT">Enable automatic updates</label></div></div>
+    <div class="col-md-3"><label class="form-label">Frequency</label><select class="form-select" name="frequency"><option value="daily" {% if tautulli.frequency=='daily' %}selected{% endif %}>Daily</option><option value="6h" {% if tautulli.frequency=='6h' %}selected{% endif %}>Every 6 hours</option><option value="12h" {% if tautulli.frequency=='12h' %}selected{% endif %}>Every 12 hours</option><option value="weekly" {% if tautulli.frequency=='weekly' %}selected{% endif %}>Weekly</option></select></div>
+    <div class="col-md-2"><label class="form-label">Time</label><input class="form-control" type="time" name="time" value="{{tautulli.time}}"></div>
+    <div class="col-md-2"><label class="form-label">Weekly day</label><select class="form-select" name="day">{% for d,n in [('mon','Mon'),('tue','Tue'),('wed','Wed'),('thu','Thu'),('fri','Fri'),('sat','Sat'),('sun','Sun')] %}<option value="{{d}}" {% if tautulli.day==d %}selected{% endif %}>{{n}}</option>{% endfor %}</select></div>
+    <div class="col-md-2"><button class="btn btn-primary w-100">Save schedule</button></div>
+  </form>
+  <div class="small text-muted mt-2">Default is 1:00 AM when enabled. Update Now always remains available. Full Rescan is manual only.</div>
+</div>
+
+<div class="card mb-4"><div class="card-body">
+  <h4 class="mb-1">Admin login</h4>
+  <div class="text-muted mb-3">Dashboard, Movies, TV and title details are public read-only. Settings and administrative actions require your admin login.</div>
+  <form method="post" action="/security/settings" class="row g-3 align-items-end"><input type="hidden" name="_csrf" value="{{csrf_token()}}">
+    <div class="col-md-4"><label class="form-label">Remember-me duration (days)</label><input class="form-control" type="number" min="1" max="365" name="remember_days" value="{{security.remember_days}}"></div>
+    <div class="col-md-3"><button class="btn btn-primary w-100">Save login settings</button></div>
+  </form>
+  <div class="small text-muted mt-2">Remember me stores a signed session cookie, not your password. Logging out ends the remembered session on that browser.</div>
+</div></div>
+
+
+<div class="card mb-4"><div class="card-body">
+  <h4 class="mb-1">Discord</h4><div class="text-muted mb-3">Posts aggregate Plex/Tautulli stats only. Usernames and individual viewing history are never included.</div>
+  <form method="post" action="/discord/save" class="row g-3 align-items-end"><input type="hidden" name="_csrf" value="{{csrf_token()}}">
+    <div class="col-md-8"><label class="form-label">Main webhook URL</label><input class="form-control" type="password" name="webhook_url" placeholder="{{'Saved — leave blank to keep' if discord.webhook else 'Paste Discord webhook URL locally'}}"><div class="form-text">Used for general stats and Leaving Soon.</div></div>
+    <div class="col-md-4"><div class="form-check form-switch mb-2"><input class="form-check-input" type="checkbox" name="enabled" value="1" id="discordEnabled" {% if discord.enabled %}checked{% endif %}><label class="form-check-label" for="discordEnabled">Automatic random stats</label></div></div>
+    <div class="col-md-6"><label class="form-label">Movie Recommendations webhook <span class="text-muted">(optional)</span></label><input class="form-control" type="password" name="movie_webhook_url" placeholder="{{'Saved — leave blank to keep' if discord.movie_webhook else 'Blank = use Main webhook'}}"><div class="form-text">Route Movie Recommendations to your Movie Discord channel.</div></div>
+    <div class="col-md-6"><label class="form-label">TV Recommendations webhook <span class="text-muted">(optional)</span></label><input class="form-control" type="password" name="tv_webhook_url" placeholder="{{'Saved — leave blank to keep' if discord.tv_webhook else 'Blank = use Main webhook'}}"><div class="form-text">Route TV Recommendations to your TV Discord channel.</div></div>
+    <div class="col-12"><hr><h5 class="mb-1">Interactive Discord bot</h5><div class="text-muted mb-2">Adds <code>/search</code> to Discord. The bot uses the same MyCouch search and returns Plex posters plus Open in Plex links.</div></div>
+    <div class="col-md-6"><label class="form-label">Bot token</label><input class="form-control" type="password" name="bot_token" placeholder="{{'Saved — leave blank to keep' if discord.bot_token else 'Paste Discord bot token locally'}}"><div class="form-text">Stored locally in auditor.db and never shown publicly.</div></div>
+    <div class="col-md-3"><label class="form-label">Discord Server / Guild ID <span class="text-muted">(recommended)</span></label><input class="form-control" name="bot_guild_id" value="{{discord.bot_guild_id}}" inputmode="numeric" placeholder="123456789012345678"><div class="form-text">Makes /search appear immediately in this server.</div></div>
+    <div class="col-md-3"><div class="form-check form-switch mb-2"><input class="form-check-input" type="checkbox" name="bot_enabled" value="1" id="discordBotEnabled" {% if discord.bot_enabled %}checked{% endif %}><label class="form-check-label" for="discordBotEnabled">Enable /search bot</label></div><div class="form-check form-switch"><input class="form-check-input" type="checkbox" name="bot_ephemeral" value="1" id="discordBotEphemeral" {% if discord.bot_ephemeral %}checked{% endif %}><label class="form-check-label" for="discordBotEphemeral">Private search replies</label></div></div>
+    <div class="col-12"><div class="form-text">After enabling or changing the bot token, restart MyCouch. Bot status: <b>{{ 'Connected as ' + discord.bot_status.user if discord.bot_status.connected else ('Error: ' + discord.bot_status.error if discord.bot_status.error else 'Not connected') }}</b>{% if discord.bot_status.connected %} · Command sync: <b>{{ (discord.bot_status.sync_count|string) + ' command(s) ✓' if discord.bot_status.commands_synced else ('Error: ' + discord.bot_status.error if discord.bot_status.error else 'pending') }}</b>{% endif %}</div></div>
+    <div class="col-md-3"><label class="form-label">Frequency</label><select class="form-select" name="frequency"><option value="daily" {% if discord.frequency=='daily' %}selected{% endif %}>Daily</option><option value="3xweek" {% if discord.frequency=='3xweek' %}selected{% endif %}>Mon / Wed / Fri</option><option value="weekly" {% if discord.frequency=='weekly' %}selected{% endif %}>Weekly</option></select></div>
+    <div class="col-md-2"><label class="form-label">Post time</label><input class="form-control" type="time" name="time" value="{{discord.time}}"></div>
+    <div class="col-md-2"><label class="form-label">Weekly day</label><select class="form-select" name="weekday">{% for n,d in [(0,'Mon'),(1,'Tue'),(2,'Wed'),(3,'Thu'),(4,'Fri'),(5,'Sat'),(6,'Sun')] %}<option value="{{n}}" {% if discord.weekday|string==n|string %}selected{% endif %}>{{d}}</option>{% endfor %}</select></div>
+    <div class="col-md-2"><label class="form-label">Stats period</label><select class="form-select" name="stats_days">{% for n in [7,30,90,365] %}<option value="{{n}}" {% if discord.stats_days|string==n|string %}selected{% endif %}>{{n}} days</option>{% endfor %}</select></div>
+    <div class="col-md-2"><label class="form-label">Repeat cooldown</label><div class="input-group"><input class="form-control" type="number" min="1" max="3650" name="cooldown" value="{{discord.cooldown}}"><span class="input-group-text">days</span></div></div>
+    <div class="col-12"><label class="form-label d-block">Random stat categories</label>{% for key,label in [('popular_movie','Popular movie'),('popular_tv','Popular TV'),('viewing_hours','Viewing summary'),('storage_hog','Storage hog'),('forgotten','Forgotten show'),('movie_recommendation','Movie recommendation'),('tv_recommendation','TV recommendation')] %}<div class="form-check form-check-inline"><input class="form-check-input" type="checkbox" name="cat_{{key}}" value="1" id="cat_{{key}}" {% if key in discord.categories %}checked{% endif %}><label class="form-check-label" for="cat_{{key}}">{{label}}</label></div>{% endfor %}</div>
+    <div class="col-12"><button class="btn btn-primary">Save Discord settings</button></div>
+  </form>
+  <div class="d-flex flex-wrap gap-2 mt-3"><form method="post" action="/discord/test"><input type="hidden" name="_csrf" value="{{csrf_token()}}"><button class="btn btn-outline-info" {% if not discord.webhook %}disabled{% endif %}>Test Main</button></form><form method="post" action="/discord/test-recommendation/movie"><input type="hidden" name="_csrf" value="{{csrf_token()}}"><button class="btn btn-outline-info" {% if not discord.webhook and not discord.movie_webhook %}disabled{% endif %}>Test Movie</button></form><form method="post" action="/discord/test-recommendation/tv"><input type="hidden" name="_csrf" value="{{csrf_token()}}"><button class="btn btn-outline-info" {% if not discord.webhook and not discord.tv_webhook %}disabled{% endif %}>Test TV</button></form><form method="post" action="/discord/send-stat"><input type="hidden" name="_csrf" value="{{csrf_token()}}"><button class="btn btn-success" {% if not discord.webhook %}disabled{% endif %}>Send Random Stat Now</button></form><form method="post" action="/discord/send-recommendation/movie"><input type="hidden" name="_csrf" value="{{csrf_token()}}"><button class="btn btn-success" {% if not discord.webhook and not discord.movie_webhook %}disabled{% endif %}>Send Movie Recommendation</button></form><form method="post" action="/discord/send-recommendation/tv"><input type="hidden" name="_csrf" value="{{csrf_token()}}"><button class="btn btn-success" {% if not discord.webhook and not discord.tv_webhook %}disabled{% endif %}>Send TV Recommendation</button></form></div>
+  <div class="small text-muted mt-2">Last post: <b>{{discord.last_post}}</b>{% if discord.last_error %} · Last error: {{discord.last_error}}{% endif %}</div>
+  <hr><form method="post" action="/leaving-soon/settings" class="row g-3 align-items-end"><input type="hidden" name="_csrf" value="{{csrf_token()}}"><div class="col-md-3"><label class="form-label">Leaving Soon period</label><div class="input-group"><input class="form-control" type="number" min="1" max="90" name="days" value="{{discord.leaving_days}}"><span class="input-group-text">days</span></div></div><div class="col-md-3"><button class="btn btn-primary w-100">Save period</button></div></form>
+  <div class="small text-muted mt-2">Leaving Soon is announcement/review only in v2.9. Discord reactions are not read yet and nothing is automatically deleted.</div>
+</div></div>
+
+<div class="card mb-4"><div class="card-body">
+  <h4 class="mb-1">SQLite Backups</h4>
+  <div class="text-muted mb-3">Creates consistent online snapshots of <code>auditor.db</code> and <code>auditor-cache.db</code> while the Auditor is running.</div>
+  <form method="post" action="/backup/settings" class="row g-3 align-items-end"><input type="hidden" name="_csrf" value="{{csrf_token()}}">
+    <div class="col-md-3"><div class="form-check form-switch mt-4"><input class="form-check-input" type="checkbox" name="enabled" value="1" id="backupEnabled" {% if backup.enabled %}checked{% endif %}><label class="form-check-label" for="backupEnabled">Enable daily backup</label></div></div>
+    <div class="col-md-5"><label class="form-label">Destination folder</label><input class="form-control" name="path" value="{{backup.path}}" placeholder="\\server\share\PlexAuditorBackup"></div>
+    <div class="col-md-2"><label class="form-label">Time</label><input class="form-control" type="time" name="time" value="{{backup.time}}"></div>
+    <div class="col-md-2"><label class="form-label">Keep backups</label><input class="form-control" type="number" min="1" max="365" name="keep" value="{{backup.keep}}"></div>
+    <div class="col-12"><button class="btn btn-primary">Save backup settings</button></div>
+  </form>
+  <div class="d-flex flex-wrap align-items-center gap-3 mt-3">
+    <form method="post" action="/backup/run"><input type="hidden" name="_csrf" value="{{csrf_token()}}"><button class="btn btn-success" {% if not backup.path or backup.running %}disabled{% endif %}>{{ 'Backing up…' if backup.running else 'Back Up Now' }}</button></form>
+    <span class="small text-muted">Last successful backup: <b>{{backup.last_success}}</b>{% if backup.error %} · Last error: {{backup.error}}{% endif %}</span>
+  </div>
+  <div class="small text-muted mt-2">Default schedule is daily at 2:00 AM with 14 backups retained. Old snapshots are pruned separately for each database.</div>
+</div>
+
+<h4>Protected titles</h4><table class="table"><thead><tr><th>Type</th><th>Title</th><th></th></tr></thead><tbody>{% for r in protected %}<tr><td>{{r.kind}}</td><td>{{r.title}}</td><td><form method="post" action="/protect"><input type="hidden" name="_csrf" value="{{csrf_token()}}"><input type="hidden" name="kind" value="{{r.kind}}"><input type="hidden" name="title" value="{{r.title}}"><input type="hidden" name="action" value="unprotect"><button class="btn btn-sm btn-outline-danger">Remove</button></form></td></tr>{% endfor %}</tbody></table><p><b>Built-in:</b> Star Trek: The Next Generation is protected. All TV ≥2000px high is excluded from TV cleanup analysis.</p>
+<script>
+const panel=document.getElementById('buildPanel'), btn=document.getElementById('refreshBtn');
+function fmt(sec){sec=Math.floor(sec||0);return String(Math.floor(sec/60)).padStart(2,'0')+':'+String(sec%60).padStart(2,'0')}
+async function poll(){try{const r=await fetch('/api/cache-status',{cache:'no-store'}),s=await r.json();if(s.running||s.complete||s.error){panel.classList.remove('d-none');document.getElementById('buildStage').textContent=s.stage;document.getElementById('buildPct').textContent=s.percent+'%';document.getElementById('buildBar').style.width=s.percent+'%';document.getElementById('buildMessage').textContent=s.message||'';document.getElementById('buildElapsed').textContent=fmt(s.elapsed);btn.disabled=!!s.running;btn.textContent=s.running?'Updating Plex…':'Update Plex Now';if(s.error){document.getElementById('buildBar').classList.add('bg-danger');}if(s.complete){document.getElementById('buildBar').classList.remove('progress-bar-animated');document.getElementById('buildBar').classList.add('bg-success');if(!window._reloaded){window._reloaded=true;setTimeout(()=>location.reload(),1200)}}}if(s.running)setTimeout(poll,500);}catch(e){setTimeout(poll,1500)}}
+poll();
+const arrPanel=document.getElementById('arrPanel');
+function arrSummary(s){
+  const bits=[];
+  if(s.radarr&&Object.keys(s.radarr).length) bits.push(s.radarr.ok?'Radarr: '+(s.radarr.matched||0).toLocaleString()+' matched':'Radarr: failed');
+  if(s.sonarr&&Object.keys(s.sonarr).length) bits.push(s.sonarr.ok?'Sonarr: '+(s.sonarr.matched||0).toLocaleString()+' matched':'Sonarr: failed');
+  return bits.join(' · ');
+}
+async function pollArr(){
+  try{
+    const r=await fetch('/api/arr-sync-status',{cache:'no-store'}),s=await r.json();
+    if(s.running||s.complete||s.error){
+      arrPanel.classList.remove('d-none');
+      document.getElementById('arrStage').textContent=s.stage||'Matching';
+      document.getElementById('arrPct').textContent=(s.percent||0)+'%';
+      document.getElementById('arrBar').style.width=(s.percent||0)+'%';
+      document.getElementById('arrMessage').textContent=s.message||'';
+      document.getElementById('arrElapsed').textContent=fmt(s.elapsed);
+      document.getElementById('arrResults').textContent=arrSummary(s);
+      if(s.error) document.getElementById('arrBar').classList.add('bg-danger');
+      if(s.complete&&!s.running){document.getElementById('arrBar').classList.remove('progress-bar-animated');document.getElementById('arrBar').classList.add('bg-success');}
+    }
+    if(s.running)setTimeout(pollArr,500);
+  }catch(e){setTimeout(pollArr,1500)}
+}
+pollArr();
+function esc(s){return String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]))}
+async function loadDatabases(){
+  const loading=document.getElementById('dbLoading'), list=document.getElementById('dbList'), err=document.getElementById('dbError');
+  loading.classList.remove('d-none'); err.classList.add('d-none'); list.innerHTML='';
+  try{
+    const r=await fetch('/api/database-options',{cache:'no-store'}), d=await r.json();
+    document.getElementById('dbFolder').textContent=d.folder||''; loading.classList.add('d-none');
+    if(!r.ok) throw new Error(d.error||'Could not scan database folder');
+    if(!d.databases.length){list.innerHTML='<div class="p-4 text-muted">No Plex database backups found in this folder.</div>';return;}
+    d.databases.forEach(x=>{
+      const b=document.createElement('button'); b.type='button'; b.className='list-group-item list-group-item-action bg-dark text-light border-secondary p-3';
+      b.innerHTML='<div class="d-flex justify-content-between gap-3"><div><strong>'+esc(x.name)+'</strong>'+(x.current?' <span class="badge text-bg-success">Current</span>':'')+'<div class="small text-muted mt-1">Modified '+esc(x.modified)+' · '+esc(x.size_mb)+' MB</div></div><span class="text-primary">Select</span></div>';
+      b.onclick=()=>{document.getElementById('selectedDb').value=x.path;document.getElementById('dbSelectForm').submit()}; list.appendChild(b);
+    });
+  }catch(e){loading.classList.add('d-none');err.textContent=e.message;err.classList.remove('d-none')}
+}
+
+const tautulliPanel=document.getElementById('tautulliPanel');
+async function pollTautulli(){
+  try{const r=await fetch('/api/tautulli-sync-status',{cache:'no-store'}),x=await r.json();
+    if(x.running||x.complete||x.error){tautulliPanel.classList.remove('d-none');document.getElementById('tautulliStage').textContent=x.stage||'Syncing';document.getElementById('tautulliPct').textContent=(x.percent||0)+'%';document.getElementById('tautulliBar').style.width=(x.percent||0)+'%';document.getElementById('tautulliMessage').textContent=x.message||'';document.getElementById('tautulliElapsed').textContent=fmt(x.elapsed);if(x.error)document.getElementById('tautulliBar').classList.add('bg-danger');if(x.complete&&!x.running){document.getElementById('tautulliBar').classList.remove('progress-bar-animated');document.getElementById('tautulliBar').classList.add('bg-success');}}
+    if(x.running)setTimeout(pollTautulli,500);
+  }catch(e){setTimeout(pollTautulli,1500)}
+}
+pollTautulli();
+</script>
+{% endblock %}
