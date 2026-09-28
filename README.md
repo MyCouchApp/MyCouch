@@ -8,22 +8,32 @@ MyCouch is a self-hosted companion for exploring and understanding a Plex media 
 
 ## Current release — v2.9.8
 
-This release renames **LibraryLens** to **MyCouch** while preserving the existing database format and upgrade path.
+v2.9.8 focuses on making MyCouch easier to navigate and easier for new users to understand, while keeping the existing Plex, Tautulli, Radarr, Sonarr and Discord functionality intact.
 
-Highlights include:
+### What's new in v2.9.8
+
+- Reorganised the main navigation to put the most-used MyCouch features first.
+- Renamed **Cleanup** to **Server Stats** to better reflect the information available on the page.
+- Added a collapsible **What is MyCouch?** introduction to the Dashboard.
+- Added direct links from the Dashboard introduction to **My History**, **Smart Search**, **Movies**, **TV**, **Server Stats** and Discord information.
+- The Dashboard remembers whether the **What is MyCouch?** introduction has been expanded or collapsed.
+- Added a collapsible **Smart Search on Discord** guide explaining how to use the `/search` command.
+- Refined navigation wording and general UI copy.
+
+### MyCouch features
 
 - **What's Playing on MyCouch?** live activity on the dashboard.
 - Movies and TV tables with natural/numeric sortable columns.
 - Played Count and popularity filters for 7/30/90 days, one year and all time.
 - Plex browser/PIN sign-in for private **My History** viewing stats.
-- Smart Search, Plex posters and Open in Plex links.
-- Cleanup analysis, protected titles, Review Queue and Leaving Soon.
+- **Smart Search** with Plex posters and Open in Plex links.
+- **Server Stats**, protected titles, Review Queue and Leaving Soon.
 - Read-only Radarr/Sonarr matching.
 - Tautulli-backed aggregate activity and personal history.
 - Discord webhooks plus optional `/search` bot integration.
 - Dark/light theme — light mode remains available by special request from Kyle, who apparently prefers staring into the sun.
 
-### v2.9.6 fixes included
+### Earlier fixes included
 
 - **v2.9.6.1:** fixed the SQLite `NATURAL` collation syntax error.
 - **v2.9.6.2:** fixed natural sorting for Unicode numeric characters such as superscript `²`.
