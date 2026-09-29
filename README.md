@@ -1,93 +1,68 @@
 # 🛋️ MyCouch
 
-**A self-hosted Plex dashboard for exploring your media library, viewing history, server stats and finding what to watch next.**
+<img src="static/mycouch-github.png" alt="MyCouch couch mascot" width="180">
 
 **Your media. Your history. What's next?**
 
-MyCouch is a free, open-source companion for Plex Media Server. It brings Plex library statistics, personal viewing history, live activity, natural-language Smart Search and media discovery into one simple web dashboard.
-
-MyCouch integrates with Plex, Tautulli, Radarr and Sonarr, with optional Discord integration for searching your Plex library using the `/search` command.
+MyCouch is a self-hosted companion for exploring and understanding a Plex media library. It combines library analysis, viewing activity, discovery/search, personal play history, cleanup review, Radarr/Sonarr matching, Tautulli activity and optional Discord integration.
 
 > MyCouch is an independent project and is not affiliated with Plex, Tautulli, Radarr, Sonarr, Discord, Emby or Jellyfin.
 
-## Features
+## Current release — v2.9.10
 
-* Plex dashboard and library statistics
-* Personal Plex viewing history with Plex sign-in
-* Live **What's Playing on MyCouch?** activity
-* Natural-language Smart Search
-* Recently Added and Recently Watched
-* Movie and TV library analysis
-* Server and library size statistics
-* Played Count and popularity filters
-* Tautulli viewing activity
-* Read-only Radarr and Sonarr matching
-* Review Queue and Leaving Soon tools
-* Discord webhooks and optional `/search` bot integration
-* Dark and light themes
+### What's new in v2.9.10
 
-## Screenshots
-
-### Dashboard
-
-See what's new, what's recently been watched, and what's happening across your Plex library.
-
-![MyCouch Plex Dashboard](docs/screenshots/Dashboard.png)
-
-### Smart Search
-
-Describe what you feel like watching in natural language and let MyCouch search your Plex library for matching titles.
-
-![MyCouch Plex Smart Search](docs/screenshots/SmartSearch.png)
-
-### Server Stats
-
-Explore Plex library size, storage usage, viewing activity and potential cleanup candidates.
-
-![MyCouch Plex Server Stats](docs/screenshots/ServerStats.png)
-
-### My History
-
-Sign in with Plex to see your personal viewing history, watch time and most-played titles.
-
-![MyCouch Plex Viewing History](docs/screenshots/MyHistory.png)
-
-### Movies
-
-Browse and analyse your movie library with viewing activity, file information and Radarr matching.
-
-![MyCouch Plex Movie Library](docs/screenshots/Movies.png)
-
-## Current release — v2.9.9
+- Added the approved MyCouch couch artwork to the dashboard and section headings, with a light-theme logo and a compact GitHub avatar.
+- Preserved the v2.9.9 dashboard redesign, poster panels, and split navigation.
 
 ### What's new in v2.9.9
 
-* Redesigned the Dashboard around real MyCouch, Plex and Tautulli data already held by the application.
-* Added poster-based **Recently Added** and **Recently Watched** panels.
-* Reorganised navigation so primary MyCouch features sit on the left and account, admin and display controls sit on the right.
-* Moved **Welcome to MyCouch** to the top of the Dashboard.
-* Moved Movies, TV Shows, Users and total Library Size summary cards to the top of **Server Stats**.
-* Retained Smart Search, live **What's Playing on MyCouch?** and existing Tautulli activity.
-* Improved the **What is MyCouch?** introduction and feature links.
-* Improved Discord help and `/search` formatting.
-* General layout and UI improvements.
+- Redesigned the Dashboard around real MyCouch/Plex/Tautulli data already held by the application.
+- Added Movies, TV Shows, Users and total Library Size summary cards.
+- Added poster-based Recently Added and Recently Watched panels.
+- Split navigation into primary features on the left and secondary/account controls on the right.
+- Retained Smart Search, live What's Playing on MyCouch? and Tautulli activity on the Dashboard.
 
-### Other highlights
 
-* Movies and TV tables with natural/numeric sortable columns.
-* Played Count and popularity filters for 7/30/90 days, one year and all time.
-* Plex browser/PIN sign-in for private **My History** viewing stats.
-* Smart Search with Plex posters and **Open in Plex** links.
-* Server Stats analysis, protected titles, Review Queue and Leaving Soon.
-* Read-only Radarr/Sonarr matching.
-* Tautulli-backed aggregate activity and personal history.
-* Discord webhooks plus optional `/search` bot integration.
-* Dark/light theme — light mode remains available by special request from Kyle, who apparently prefers staring into the sun.
+This release renames **LibraryLens** to **MyCouch** while preserving the existing database format and upgrade path.
+
+Highlights include:
+
+- **What's Playing on MyCouch?** live activity on the dashboard.
+- Movies and TV tables with natural/numeric sortable columns.
+- Played Count and popularity filters for 7/30/90 days, one year and all time.
+- Plex browser/PIN sign-in for private **My History** viewing stats.
+- Smart Search, Plex posters and Open in Plex links.
+- Cleanup analysis, protected titles, Review Queue and Leaving Soon.
+- Read-only Radarr/Sonarr matching.
+- Tautulli-backed aggregate activity and personal history.
+- Discord webhooks plus optional `/search` bot integration.
+- Dark/light theme — light mode remains available by special request from Kyle, who apparently prefers staring into the sun.
 
 ### v2.9.6 fixes included
 
-* **v2.9.6.1:** fixed the SQLite `NATURAL` collation syntax error.
-* **v2.9.6.2:** fixed natural sorting for Unicode numeric characters such as superscript `²`.
+- **v2.9.6.1:** fixed the SQLite `NATURAL` collation syntax error.
+- **v2.9.6.2:** fixed natural sorting for Unicode numeric characters such as superscript `²`.
+
+## Screenshots
+
+These prepared screenshots show the v2.9.9 layout before the couch artwork was added in v2.9.10. The Plex account panel in My History is obscured.
+
+### Dashboard
+
+![Dashboard with Recently Added and Recently Watched posters](docs/screenshots/dashboard.png)
+
+### My History
+
+![Personal viewing history](docs/screenshots/my-history.png)
+
+### Server Stats
+
+![Server statistics](docs/screenshots/server-stats.png)
+
+### Movies
+
+![Movies library](docs/screenshots/movies.png)
 
 ## Fresh install on Windows
 
@@ -101,7 +76,7 @@ Browse and analyse your movie library with viewing activity, file information an
 
 `start.ps1` creates a local `.venv` and installs the packages in `requirements.txt`.
 
-You can optionally set `PLEX\_DB` before launch instead of selecting the database in Settings. See `.env.example` for an example; MyCouch does not automatically load `.env` files.
+You can optionally set `PLEX_DB` before launch instead of selecting the database in Settings. See `.env.example` for an example; MyCouch does not automatically load `.env` files.
 
 ## Upgrade from LibraryLens
 
@@ -109,9 +84,9 @@ Stop LibraryLens first and make a backup of its folder.
 
 Copy these existing runtime files into the new MyCouch folder:
 
-* `auditor.db`
-* `auditor-cache.db`
-* `.pla-secret`
+- `auditor.db`
+- `auditor-cache.db`
+- `.pla-secret`
 
 Keeping `.pla-secret` preserves existing remembered admin sessions. The legacy filenames are intentionally retained for compatibility.
 
@@ -121,13 +96,13 @@ Then run `start.ps1`. Your settings, protected titles, review queue, Tautulli ca
 
 Do **not** commit or publish your runtime databases or secret file. The supplied `.gitignore` excludes:
 
-* `auditor.db` and SQLite sidecars
-* `auditor-cache.db` and SQLite sidecars
-* `.pla-secret`
-* Plex snapshot files
-* backups/logs
-* `.env` files
-* Python virtual environments and caches
+- `auditor.db` and SQLite sidecars
+- `auditor-cache.db` and SQLite sidecars
+- `.pla-secret`
+- Plex snapshot files
+- backups/logs
+- `.env` files
+- Python virtual environments and caches
 
 API keys, Plex server tokens, Discord bot tokens/webhooks and private viewing identities are stored locally. Public pages expose aggregate activity rather than viewer identities.
 
@@ -139,11 +114,12 @@ MyCouch uses Plex's browser/PIN authorization flow and never asks for a Plex pas
 
 ## Discord
 
-Outgoing webhooks can publish aggregate statistics, recommendations and Leaving Soon notices. The optional bot adds `/search`, returning MyCouch movie matches with posters and **Open in Plex** links. Bot tokens and webhook URLs must be entered locally and should never be committed to Git.
+Outgoing webhooks can publish aggregate statistics, recommendations and Leaving Soon notices. The optional bot adds `/search`, returning MyCouch movie matches with posters and Open in Plex links. Bot tokens and webhook URLs must be entered locally and should never be committed to Git.
 
 ## GitHub
 
-The project home is the **MyCouchApp** organisation and **MyCouch** repository.
+The intended project home is the **MyCouchApp** organisation with the **MyCouch** repository.
 
 Before any public push, verify the staged files with `git status` and confirm that no databases, tokens, webhooks, backups, logs or personal media paths are included.
 
+The artwork sheet is `static/mycouch-artwork.jpg`; the square GitHub avatar is `static/mycouch-github.png`.

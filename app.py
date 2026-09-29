@@ -1766,6 +1766,7 @@ def leaving_soon_settings():
 @app.get('/changelog')
 def changelog():
     versions = [
+        ('v2.9.10', 'Added the MyCouch couch artwork to the dashboard, navigation and section headings, with a light-theme logo and GitHub avatar.'),
         ('v2.9.9', 'Dashboard redesign: Welcome moved to the top, library summary cards moved to Server Stats, Recently Added and Recently Watched poster panels added, split primary/secondary navigation, and retained live Now Playing and Tautulli activity.'),
         ('v2.9.8', 'UI and navigation update: reordered the main menu, renamed Cleanup to Server Stats, added a collapsible linked MyCouch introduction to the Dashboard, and documented Discord /search directly on Smart Search.'),
         ('v2.9.7', 'Renamed LibraryLens to MyCouch. Added GitHub-ready project hygiene, removed machine-specific defaults, refreshed documentation and branding, and renamed the dashboard Now Playing section to “What’s Playing on MyCouch?”. Existing auditor.db, auditor-cache.db and .pla-secret files remain compatible.'),

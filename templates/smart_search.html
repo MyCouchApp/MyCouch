@@ -1,5 +1,5 @@
 {% extends 'base.html' %}{% block content %}
-<div class="page-head"><div><h1>Smart Search</h1><p class="muted">Describe the movie you want instead of remembering its title.</p></div></div>
+<div class="page-head"><div class="branded-heading"><span class="couch-icon couch-icon-search" role="img" aria-label="MyCouch mascot"></span><div><h1>Smart Search</h1><p class="muted">Describe the movie you want instead of remembering its title.</p></div></div></div>
 <section class="panel mb-4">
   <form method="get" action="{{ url_for('smart_search') }}" id="smart-search-form"><div class="input-group input-group-lg"><input autofocus class="form-control" name="q" value="{{q}}" placeholder="man stuck in wilderness and struggles to get home"><button class="btn btn-primary" id="smart-search-button" type="submit">Search</button></div>
   <div id="smart-search-progress" class="mt-3 d-none" aria-live="polite">

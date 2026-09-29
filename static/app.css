@@ -39,3 +39,14 @@
 @media(max-width:700px){.poster-grid{grid-template-columns:repeat(6,92px)}.dashboard-metric strong{font-size:1.55rem}.dashboard-metric{padding:14px;min-height:105px}}
 
 code.inline-code{display:inline;padding:.08rem .35rem;margin:0 .12rem;border-radius:5px;white-space:nowrap;word-break:normal;vertical-align:baseline}
+
+/* MyCouch artwork from the approved brand sheet. The page tiles omit its printed labels. */
+.brand-mascot{width:34px;height:34px;object-fit:cover;border-radius:9px;vertical-align:middle;margin-right:4px}
+.branded-heading{display:flex;align-items:center;gap:12px;min-width:0}
+.couch-icon{display:block;flex:none;width:78px;height:78px;border-radius:15px;background-image:url('/static/mycouch-artwork.jpg');background-repeat:no-repeat;background-size:600% 640%;background-position:0 62.5%}
+.couch-icon-movies{background-position:20% 62.5%}.couch-icon-tv{background-position:40% 62.5%}.couch-icon-search{background-position:60% 62.5%}.couch-icon-server{background-position:80% 62.5%}.couch-icon-history{background-position:0 90.3%}.couch-icon-requests{background-position:80% 90.3%}.couch-icon-upcoming{background-position:60% 90.3%}.couch-icon-settings{background-position:100% 90.3%}
+.couch-logo{width:310px;max-width:100%;aspect-ratio:838/504;margin:0 0 0 auto;background-image:url('/static/mycouch-artwork.jpg');background-repeat:no-repeat;background-size:183.3% auto;background-position:left top;border-radius:16px}
+[data-bs-theme="light"] .couch-logo{aspect-ratio:698/504;background-size:220.1% auto;background-position:right top}
+@media(max-width:575px){.couch-icon{width:58px;height:58px;border-radius:11px}.branded-heading{gap:9px}.page-head h1{font-size:1.5rem}.couch-logo{margin-bottom:16px}}
+
+.dashboard-welcome{display:flex;align-items:center;justify-content:space-between;gap:20px}.dashboard-welcome .couch-logo{flex:none}@media(max-width:650px){.dashboard-welcome{display:block}.dashboard-welcome .couch-logo{width:min(100%,300px);margin:12px auto 0}}
