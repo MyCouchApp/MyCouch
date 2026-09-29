@@ -1,5 +1,11 @@
 {% extends 'base.html' %}{% block content %}
 <div class="page-head"><div><h1>Server Stats</h1><p class="muted">Library, storage and cleanup analysis · based on cache refreshed {{cache.refreshed_at or "never"}}</p></div></div>
+<div class="row g-3 mb-4 dashboard-summary">
+  <div class="col-6 col-xl-3"><a class="metric dashboard-metric" href="/movies"><span>Movies</span><strong>{{summary.movie_count}}</strong><small>{{summary.movie_tb}} TB</small></a></div>
+  <div class="col-6 col-xl-3"><a class="metric dashboard-metric" href="/tv"><span>TV Shows</span><strong>{{summary.tv_count}}</strong><small>{{summary.tv_tb}} TB</small></a></div>
+  <div class="col-6 col-xl-3"><div class="metric dashboard-metric"><span>Users</span><strong>{{user_count}}</strong><small>Tautulli viewers</small></div></div>
+  <div class="col-6 col-xl-3"><div class="metric dashboard-metric"><span>Library Size</span><strong>{{summary.library_tb}} TB</strong><small>Movies + TV</small></div></div>
+</div>
 <div class="row g-3 mb-4">
   <div class="col-md-6 col-xl-3"><a class="metric warning" href="/tv?filter=old_unwatched"><span>Old never-watched TV</span><strong>{{'%.2f'|format(old_tv|sum(attribute='size_gb')/1024)}} TB</strong><small>{{old_tv|length}} shows · 3+ years</small></a></div>
   <div class="col-md-6 col-xl-3"><a class="metric info" href="/movies?filter=large720"><span>Large 720p H.264</span><strong>{{'%.2f'|format(large720|sum(attribute='size_gb')/1024)}} TB</strong><small>{{large720|length}} movie files</small></a></div>

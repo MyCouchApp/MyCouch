@@ -1276,9 +1276,49 @@ def _dashboard_library_summary():
         old=c.execute('select count(*) n,coalesce(sum(size_gb),0) gb from shows where watched_episodes=0 and age>=3 and title<>?',('Star Trek: The Next Generation',)).fetchone()
         large=c.execute("select count(*) n,coalesce(sum(size_gb),0) gb from movies where resolution='720p' and codec='h264' and size_gb>=4").fetchone()
         ineff=c.execute('select count(*) n,coalesce(sum(size_gb),0) gb from shows where gbph>=1.5 and title<>?',('Star Trek: The Next Generation',)).fetchone()
+        total_gb=float(m['gb'] or 0)+float(t['gb'] or 0)
         return {'movie_count':m['n'],'movie_tb':round(m['gb']/1024,2),'tv_count':t['n'],'tv_tb':round(t['gb']/1024,2),
-                'old_count':old['n'],'old_tb':round(old['gb']/1024,2),'large_count':large['n'],'large_tb':round(large['gb']/1024,2),
+                'library_tb':round(total_gb/1024,2),'old_count':old['n'],'old_tb':round(old['gb']/1024,2),'large_count':large['n'],'large_tb':round(large['gb']/1024,2),
                 'ineff_count':ineff['n'],'ineff_tb':round(ineff['gb']/1024,2)}
+    finally: c.close()
+
+def _dashboard_recently_added(limit=6):
+    """Newest cached Plex movies/shows, using the same cache that powers Movies and TV."""
+    c=cache_conn()
+    try:
+        rows=c.execute("""
+            select 'movie' kind,metadata_id item_id,title,year,added_at from movies
+            union all
+            select 'tv' kind,show_id item_id,title,year,added_at from shows
+            order by added_at desc limit ?
+        """,(limit,)).fetchall()
+        return [dict(r) for r in rows]
+    finally: c.close()
+
+def _dashboard_recently_watched(limit=6):
+    """Latest unique titles from the existing Tautulli history cache."""
+    c=config()
+    try:
+        rows=c.execute("""
+            select kind,item_id,max(watched_at) watched_at,count(*) plays
+            from tautulli_history where item_id is not null
+            group by kind,item_id order by watched_at desc limit ?
+        """,(limit,)).fetchall()
+    finally: c.close()
+    if not rows: return []
+    cc=cache_conn(); out=[]
+    try:
+        for r in rows:
+            table,idcol=('movies','metadata_id') if r['kind']=='movie' else ('shows','show_id')
+            item=cc.execute(f'select title,year from {table} where {idcol}=?',(r['item_id'],)).fetchone()
+            if item: out.append({'kind':r['kind'],'item_id':r['item_id'],'title':item['title'],'year':item['year'],'watched_at':r['watched_at'],'plays':r['plays']})
+        return out
+    finally: cc.close()
+
+def _dashboard_user_count():
+    c=config()
+    try:
+        return c.execute("select count(distinct user) n from tautulli_history where trim(coalesce(user,''))<>''").fetchone()['n']
     finally: c.close()
 
 @app.route('/')
@@ -1292,7 +1332,7 @@ def dashboard():
     stats_started=time.perf_counter()
     stats=tautulli_dashboard_stats(days) if setting('tautulli_authoritative','0')=='1' else None
     stats_ms=(time.perf_counter()-stats_started)*1000
-    response=render_template('dashboard.html',summary=summary,review_count=len(review_ids('movie'))+len(review_ids('tv')),cache=cache_meta(),stats=stats,tautulli_last_sync=setting('tautulli_last_sync','Never'))
+    response=render_template('dashboard.html',summary=summary,user_count=_dashboard_user_count(),recently_added=_dashboard_recently_added(),recently_watched=_dashboard_recently_watched(),review_count=len(review_ids('movie'))+len(review_ids('tv')),cache=cache_meta(),stats=stats,tautulli_last_sync=setting('tautulli_last_sync','Never'))
     total_ms=(time.perf_counter()-started)*1000
     if total_ms>=250: print(f'[dashboard] rendered in {total_ms:.0f} ms (Tautulli stats {stats_ms:.0f} ms)')
     return response
@@ -1306,6 +1346,7 @@ def cleanup():
     large720=[x for x in ms if x['resolution']=='720p' and x['codec']=='h264' and x['size_gb']>=4]
     old_movies=[x for x in ms if not x['protected'] and not x['watched'] and x['age']>=3]
     return render_template('cleanup.html',old_tv=old_tv,ineff=inefficient,large720=large720,old_movies=old_movies,
+                           summary=_dashboard_library_summary(),user_count=_dashboard_user_count(),
                            review_count=len(review_ids('movie'))+len(review_ids('tv')),cache=cache_meta())
 
 def _page_args():
@@ -1725,6 +1766,7 @@ def leaving_soon_settings():
 @app.get('/changelog')
 def changelog():
     versions = [
+        ('v2.9.9', 'Dashboard redesign: Welcome moved to the top, library summary cards moved to Server Stats, Recently Added and Recently Watched poster panels added, split primary/secondary navigation, and retained live Now Playing and Tautulli activity.'),
         ('v2.9.8', 'UI and navigation update: reordered the main menu, renamed Cleanup to Server Stats, added a collapsible linked MyCouch introduction to the Dashboard, and documented Discord /search directly on Smart Search.'),
         ('v2.9.7', 'Renamed LibraryLens to MyCouch. Added GitHub-ready project hygiene, removed machine-specific defaults, refreshed documentation and branding, and renamed the dashboard Now Playing section to “What’s Playing on MyCouch?”. Existing auditor.db, auditor-cache.db and .pla-secret files remain compatible.'),
         ('v2.9.6.2', 'Fixed natural title sorting for Unicode numeric characters such as superscript ² by treating only ASCII 0–9 groups as numeric sort tokens.'),
