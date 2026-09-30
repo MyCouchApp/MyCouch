@@ -1,0 +1,24 @@
+{
+  "name": "MyCouch",
+  "short_name": "MyCouch",
+  "description": "A self-hosted Plex dashboard for discovery, viewing history and server insight.",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#101317",
+  "theme_color": "#15181d",
+  "icons": [
+    {
+      "src": "/static/pwa-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "/static/pwa-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ]
+}

@@ -1,21 +1,49 @@
 {% extends 'base.html' %}{% block content %}
-<div class="dashboard-welcome mb-4"><div><h1>Welcome to MyCouch</h1><p class="muted mb-0">Your media library at a glance. Refreshed {{cache.refreshed_at or "never"}}.</p></div><div class="couch-logo" role="img" aria-label="MyCouch: Your media. Your history. What’s next?"></div></div>
-
-
-<details id="mycouch-intro" class="panel dashboard-intro mb-4" open>
-  <summary class="fw-semibold">What is MyCouch?</summary>
-  <div class="pt-3 intro-copy">
-    <p><strong>MyCouch</strong> is a companion for your Plex server that makes it easier to explore your library, discover something to watch, and see what's happening on your server.</p>
-    <p><a href="/smart-search"><strong>Smart Search</strong></a> lets you search your Plex library using natural language. Ask for something like <em>“a funny 90s movie”</em> or <em>“a short thriller for tonight”</em> and MyCouch will find matching titles.</p>
-    <p><a href="/my-history"><strong>My History</strong></a> shows your personal Plex viewing history, making it easy to see what you've watched.</p>
-    <p><a href="/movies"><strong>Movies</strong></a> &amp; <a href="/tv"><strong>TV</strong></a> let you browse and explore the content available on your Plex server.</p>
-    <p><a href="/cleanup"><strong>Server Stats</strong></a> gives you an overview of your Plex library and helps you understand what's taking up space.</p>
-    <p><a href="/smart-search#discord"><strong>Discord Integration</strong></a> brings Smart Search to your Discord server using the <code class="inline-code">/search</code> command, so you can find something to watch without opening MyCouch.</p>
-    <p class="mb-0">MyCouch runs alongside Plex and is designed to give you a simple, friendly way to get more from your media library.</p>
+<section class="mc-welcome-hero mb-4">
+  <div class="mc-welcome-copy">
+    <span class="mc-kicker">Your media. Your history. What's next?</span>
+    <h1>Welcome to MyCouch</h1>
+    <p>Explore your Plex library, discover something to watch, revisit your history and keep an eye on your server — all from your couch.</p>
+    <div class="mc-welcome-actions">
+      <a class="btn btn-primary" href="/smart-search">Find something to watch</a>
+      <a class="btn btn-outline-secondary" href="#recent">See what's new</a>
+    </div>
+    <small class="muted">Library refreshed {{cache.refreshed_at or "never"}}.</small>
   </div>
-</details>
+  <div class="mc-welcome-art" aria-hidden="true">
+    <img src="/static/mascots/hero-wide.png" alt="">
+  </div>
+</section>
 
+<section class="mc-shortcuts mb-4" aria-label="Explore MyCouch">
+  <a class="mc-shortcut" href="/smart-search">
+    <img src="/static/mascots/search-card.png" alt="" aria-hidden="true">
+    <strong>Smart Search</strong>
+    <span>Describe what you want to watch</span>
+  </a>
+  <a class="mc-shortcut" href="/movies">
+    <img src="/static/mascots/movies-card.png" alt="" aria-hidden="true">
+    <strong>Movies</strong>
+    <span>Explore your movie library</span>
+  </a>
+  <a class="mc-shortcut" href="/tv">
+    <img src="/static/mascots/tv-card.png" alt="" aria-hidden="true">
+    <strong>TV Shows</strong>
+    <span>Browse your TV collection</span>
+  </a>
+  <a class="mc-shortcut" href="/my-history">
+    <img src="/static/mascots/history-card.png" alt="" aria-hidden="true">
+    <strong>My History</strong>
+    <span>See what you've watched</span>
+  </a>
+  <a class="mc-shortcut" href="/cleanup">
+    <img src="/static/mascots/server-card.png" alt="" aria-hidden="true">
+    <strong>Server Stats</strong>
+    <span>Understand your library</span>
+  </a>
+</section>
 
+<div id="recent"></div>
 <div class="row g-4 mb-4">
   <div class="col-xl-6"><section class="panel media-shelf h-100"><div class="shelf-head"><div><h3>Recently Added</h3><p class="muted">Newest additions to your Plex library.</p></div></div><div class="poster-grid">{% for x in recently_added %}<a class="poster-card" href="/{{'movie' if x.kind=='movie' else 'show'}}/{{x.item_id}}"><div class="poster-frame"><img src="/smart-search/poster/{{x.item_id}}" alt="" loading="lazy" onerror="this.style.display='none';this.nextElementSibling.style.display='flex'"><div class="poster-fallback">{{'Movie' if x.kind=='movie' else 'TV'}}</div></div><strong>{{x.title}}</strong><small>{{x.year or ''}}</small></a>{% else %}<p class="muted mb-0">No recent additions found.</p>{% endfor %}</div></section></div>
   <div class="col-xl-6"><section class="panel media-shelf h-100"><div class="shelf-head"><div><h3>Recently Watched</h3><p class="muted">Latest titles from your Tautulli history.</p></div></div><div class="poster-grid">{% for x in recently_watched %}<a class="poster-card" href="/{{'movie' if x.kind=='movie' else 'show'}}/{{x.item_id}}"><div class="poster-frame"><img src="/smart-search/poster/{{x.item_id}}" alt="" loading="lazy" onerror="this.style.display='none';this.nextElementSibling.style.display='flex'"><div class="poster-fallback">{{'Movie' if x.kind=='movie' else 'TV'}}</div></div><strong>{{x.title}}</strong><small>{{x.watched_at|timestamp_date}}</small></a>{% else %}<p class="muted mb-0">No Tautulli viewing history found.</p>{% endfor %}</div></section></div>

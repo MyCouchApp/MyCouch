@@ -1,7 +1,7 @@
 import os, sqlite3, csv, io, shutil, tempfile, time, threading, json, urllib.request, urllib.error, secrets, re, math, mimetypes, xml.etree.ElementTree as ET
 from datetime import datetime, timezone, timedelta
 from urllib.parse import urlencode, quote
-from flask import Flask, render_template, request, redirect, url_for, Response, abort, flash, session, g
+from flask import Flask, render_template, request, redirect, url_for, Response, abort, flash, session, g, send_from_directory
 import requests
 
 from werkzeug.security import generate_password_hash, check_password_hash
@@ -21,7 +21,7 @@ def _app_secret():
 app=Flask(__name__); app.secret_key=_app_secret()
 app.config.update(SESSION_COOKIE_HTTPONLY=True,SESSION_COOKIE_SAMESITE='Lax',SESSION_COOKIE_SECURE=(os.environ.get('MYCOUCH_SECURE_COOKIE') or os.environ.get('PLA_SECURE_COOKIE','0'))=='1')
 BUILD_LOCK=threading.Lock()
-APP_VERSION='2.9.7'
+APP_VERSION='2.9.11'
 PLEX_UPDATE_STATUS={'running':False,'last_update':None,'error':None}
 SMART_LOCK=threading.Lock(); SMART_MODEL=None; SMART_VECTORS=None; SMART_IDS=None
 BUILD_STATUS={'running':False,'stage':'Idle','percent':0,'current':0,'total':0,'message':'','started_at':None,'elapsed':0,'error':None,'complete':False}
@@ -89,6 +89,14 @@ def csrf_token():
     return token
 
 app.jinja_env.globals.update(is_admin=is_admin, csrf_token=csrf_token)
+
+
+@app.route('/sw.js')
+def service_worker():
+    response = send_from_directory(app.static_folder, 'service-worker.js')
+    response.headers['Cache-Control'] = 'no-cache'
+    response.headers['Service-Worker-Allowed'] = '/'
+    return response
 
 def plex_user():
     return session.get('plex_user') or {}
@@ -1766,6 +1774,7 @@ def leaving_soon_settings():
 @app.get('/changelog')
 def changelog():
     versions = [
+        ('v2.9.11', 'Redesigned the Dashboard with a visual welcome hero and mascot shortcuts, introduced a responsive left-hand navigation sidebar, moved account/admin controls to the bottom, and removed duplicated page-heading mascot artwork.'),
         ('v2.9.10', 'Added the MyCouch couch artwork to the dashboard, navigation and section headings, with a light-theme logo and GitHub avatar.'),
         ('v2.9.9', 'Dashboard redesign: Welcome moved to the top, library summary cards moved to Server Stats, Recently Added and Recently Watched poster panels added, split primary/secondary navigation, and retained live Now Playing and Tautulli activity.'),
         ('v2.9.8', 'UI and navigation update: reordered the main menu, renamed Cleanup to Server Stats, added a collapsible linked MyCouch introduction to the Dashboard, and documented Discord /search directly on Smart Search.'),
