@@ -31,8 +31,19 @@
     <p class="mb-0"><strong>No Plex password or MyCouch login is required to use <code>/search</code> in Discord.</strong> Access is controlled through your Discord server.</p>
   </div>
 </details>
-{% if q %}<section class="panel"><h4>Results for “{{q}}”</h4><div class="row g-3 mt-1">
-{% for x in results %}<div class="col-md-6 col-xl-4"><div class="card h-100 smart-card"><div class="row g-0 h-100"><div class="col-4 smart-poster-wrap"><img src="{{ url_for('smart_search_poster', item_id=x.metadata_id) }}" class="smart-poster" loading="lazy" alt="{{x.title}} poster" onerror="this.style.display='none';this.nextElementSibling.style.display='flex'"><div class="smart-poster-fallback" style="display:none">No poster</div></div><div class="col-8"><div class="card-body d-flex flex-column h-100"><h5 class="mb-1"><a href="/movie/{{x.metadata_id}}">{{x.title}}</a>{% if x.year %} <span class="text-muted">({{x.year}})</span>{% endif %}</h5>{% if x.genres_display %}<div class="small text-secondary mb-2">{{x.genres_display}}</div>{% endif %}<div class="mb-2"><span class="badge text-bg-info">{{x.match_label}}</span></div><p class="smart-summary mb-3">{{x.summary or 'No Plex summary available.'}}</p><div class="mt-auto d-flex gap-2 flex-wrap"><a class="btn btn-sm btn-outline-light" href="/movie/{{x.metadata_id}}">Details</a>{% if x.plex_url %}<a class="btn btn-sm btn-warning" href="{{x.plex_url}}" target="_blank" rel="noopener">▶ Open in Plex</a>{% endif %}</div></div></div></div></div></div>{% else %}<div class="col-12 text-muted">No useful matches found. Try describing the plot with a few different concepts.</div>{% endfor %}
+{% if q %}<section class="panel"><h4>Results for “{{q}}”</h4>
+{% if interpretation %}<div class="small text-secondary mt-2 mb-3"><strong>Smart Search understood:</strong> {{ interpretation|join(' · ') }}</div>{% endif %}
+{% if not results and not show_closest %}
+<div class="alert alert-secondary mb-3">No exact matches found for all of those constraints.</div>
+<a class="btn btn-outline-info btn-sm mb-3" href="{{ url_for('smart_search', q=q, closest=1) }}">Show closest matches</a>
+{% elif show_closest %}
+<div class="small text-secondary mb-3">
+{% if closest_relaxation %}No exact matches. Showing matches with the <strong>{{ closest_relaxation }}</strong> relaxed.{% else %}No close matches found without relaxing more than one core constraint.{% endif %}
+<a href="{{ url_for('smart_search', q=q) }}">Back to exact matches</a>
+</div>
+{% endif %}
+<div class="row g-3 mt-1">
+{% for x in results %}<div class="col-md-6 col-xl-4"><div class="card h-100 smart-card"><div class="row g-0 h-100"><div class="col-4 smart-poster-wrap"><img src="{{ url_for('smart_search_poster', item_id=x.metadata_id) }}" class="smart-poster" loading="lazy" alt="{{x.title}} poster" onerror="this.style.display='none';this.nextElementSibling.style.display='flex'"><div class="smart-poster-fallback" style="display:none">No poster</div></div><div class="col-8"><div class="card-body d-flex flex-column h-100"><h5 class="mb-1"><a href="/movie/{{x.metadata_id}}">{{x.title}}</a>{% if x.year %} <span class="text-muted">({{x.year}})</span>{% endif %}</h5>{% if x.genres_display %}<div class="small text-secondary mb-2">{{x.genres_display}}</div>{% endif %}<div class="mb-2"><span class="badge text-bg-info">{{x.match_label}}</span></div><p class="smart-summary mb-3">{{x.summary or 'No Plex summary available.'}}</p><div class="mt-auto d-flex gap-2 flex-wrap"><a class="btn btn-sm btn-outline-light" href="/movie/{{x.metadata_id}}">Details</a>{% if x.plex_url %}<a class="btn btn-sm btn-warning" href="{{x.plex_url}}" target="_blank" rel="noopener">▶ Open in Plex</a>{% endif %}</div></div></div></div></div></div>{% else %}{% if show_closest %}<div class="col-12 text-muted">No close matches found either. Try relaxing one of the constraints in your search.</div>{% endif %}{% endfor %}
 </div></section>{% endif %}<script>
 (function(){
   const form=document.getElementById('smart-search-form');

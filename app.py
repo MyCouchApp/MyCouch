@@ -21,7 +21,7 @@ def _app_secret():
 app=Flask(__name__); app.secret_key=_app_secret()
 app.config.update(SESSION_COOKIE_HTTPONLY=True,SESSION_COOKIE_SAMESITE='Lax',SESSION_COOKIE_SECURE=(os.environ.get('MYCOUCH_SECURE_COOKIE') or os.environ.get('PLA_SECURE_COOKIE','0'))=='1')
 BUILD_LOCK=threading.Lock()
-APP_VERSION='2.9.11'
+APP_VERSION='2.9.12'
 PLEX_UPDATE_STATUS={'running':False,'last_update':None,'error':None}
 SMART_LOCK=threading.Lock(); SMART_MODEL=None; SMART_VECTORS=None; SMART_IDS=None
 BUILD_STATUS={'running':False,'stage':'Idle','percent':0,'current':0,'total':0,'message':'','started_at':None,'elapsed':0,'error':None,'complete':False}
@@ -50,8 +50,16 @@ def config():
     c.execute('create table if not exists protected(kind text,title text,note text,primary key(kind,title))')
     c.execute('create table if not exists review(kind text,item_id integer,title text,action text default "review",note text,added_at text default current_timestamp,primary key(kind,item_id))')
     c.execute('create table if not exists settings(key text primary key,value text)')
-    c.execute('create table if not exists smart_search_history(id integer primary key autoincrement,query text not null unique,searched_at integer not null)')
-    c.execute('create index if not exists idx_smart_search_history_recent on smart_search_history(searched_at desc)')
+    c.execute("create table if not exists smart_search_history(id integer primary key autoincrement,query text not null,owner_key text not null default 'shared',searched_at integer not null)")
+    # v2.9.12: migrate the original globally-unique history so Plex users can have personal histories.
+    history_cols={r[1] for r in c.execute('pragma table_info(smart_search_history)').fetchall()}
+    if 'owner_key' not in history_cols:
+        c.execute('alter table smart_search_history rename to smart_search_history_legacy')
+        c.execute("create table smart_search_history(id integer primary key autoincrement,query text not null,owner_key text not null default 'shared',searched_at integer not null)")
+        c.execute("insert into smart_search_history(query,owner_key,searched_at) select query,'shared',searched_at from smart_search_history_legacy")
+        c.execute('drop table smart_search_history_legacy')
+    c.execute('create unique index if not exists idx_smart_search_history_owner_query on smart_search_history(owner_key,query)')
+    c.execute('create index if not exists idx_smart_search_history_recent on smart_search_history(owner_key,searched_at desc)')
     c.execute('create table if not exists discord_posts(id integer primary key autoincrement,category text,item_key text,message text,posted_at integer)')
     c.execute('create index if not exists idx_discord_posts_recent on discord_posts(posted_at)')
     c.execute('create table if not exists leaving_soon(kind text,item_id integer,title text,size_gb real,deadline integer,status text default "announced",discord_posted integer default 0,added_at integer,primary key(kind,item_id))')
@@ -88,7 +96,7 @@ def csrf_token():
         token=secrets.token_urlsafe(32); session['_csrf']=token
     return token
 
-app.jinja_env.globals.update(is_admin=is_admin, csrf_token=csrf_token)
+app.jinja_env.globals.update(is_admin=is_admin, csrf_token=csrf_token, app_version=APP_VERSION)
 
 
 @app.route('/sw.js')
@@ -1193,6 +1201,7 @@ _SMART_SYNONYMS={
  'funny':['comedy','comic','humor','hilarious'], 'scary':['horror','terror','frightening'],
  'space':['sci-fi','science fiction','alien','spaceship','planet'], 'romantic':['romance','love'],
  'war':['military','soldier','battle'], 'crime':['criminal','detective','murder','police']}
+
 def _smart_terms(q):
     terms=re.findall(r"[a-z0-9']+",q.lower()); out=list(terms)
     for t in terms: out.extend(_SMART_SYNONYMS.get(t,[]))
@@ -1213,57 +1222,194 @@ def _clean_genres(value):
             found.append(_KNOWN_GENRES[key])
     return found
 
-def _lexical_smart_search(q,limit=20):
-    terms=_smart_terms(q); c=cache_conn()
+def _smart_constraints(q):
+    """Extract constraints that should not be treated as ordinary fuzzy keywords."""
+    text=(q or '').lower()
+    out={'year_min':None,'year_max':None,'watched':None,'genres':[],'runtime_min':None,'runtime_max':None}
+    # Decades: "90s", "1990s", "from/in the 90s".
+    m=re.search(r'(?<!\d)(?:(19|20)?(\d0))s\b',text)
+    if m:
+        prefix=m.group(1); decade=int(m.group(2))
+        if prefix: year=int(prefix)*100+decade
+        else: year=(1900+decade) if decade>=30 else (2000+decade)
+        out['year_min'],out['year_max']=year,year+9
+    else:
+        m=re.search(r'\b(19\d{2}|20\d{2})\b',text)
+        if m: out['year_min']=out['year_max']=int(m.group(1))
+    if re.search(r'\b(unwatched|not watched|haven[\'’]?t watched|never watched)\b',text): out['watched']=False
+    elif re.search(r'\b(watched|seen)\b',text): out['watched']=True
+    genre_patterns={
+        'Comedy':r'\b(comedy|comedies|funny|hilarious|comic)\b',
+        'Sci-Fi':r'\b(sci[ -]?fi|science fiction)\b',
+        'Horror':r'\b(horror|scary|frightening)\b',
+        'Romance':r'\b(romance|romantic)\b',
+        'Action':r'\baction\b', 'Adventure':r'\badventure\b', 'Crime':r'\bcrime\b',
+        'Documentary':r'\bdocumentar(?:y|ies)\b', 'Drama':r'\bdrama\b', 'Fantasy':r'\bfantasy\b',
+        'Mystery':r'\bmystery\b', 'Thriller':r'\bthriller\b', 'War':r'\bwar\b', 'Western':r'\bwestern\b'
+    }
+    for genre,pat in genre_patterns.items():
+        if re.search(pat,text): out['genres'].append(genre)
+
+    # Runtime constraints. Plex stores movie duration in milliseconds.
+    # Examples: "under 90 minutes", "less than 2 hours", "over 2 hours",
+    # "at least 100 minutes", "around 90 minutes", "about 2 hours".
+    runtime_patterns=[
+        (r'\b(?:under|less than|shorter than|no more than|up to)\s+(\d+(?:\.\d+)?)\s*(hours?|hrs?|hr|h|minutes?|mins?|min|m)\b','max'),
+        (r'\b(?:over|more than|longer than|at least)\s+(\d+(?:\.\d+)?)\s*(hours?|hrs?|hr|h|minutes?|mins?|min|m)\b','min'),
+        (r'\b(?:around|about|roughly|approximately)\s+(\d+(?:\.\d+)?)\s*(hours?|hrs?|hr|h|minutes?|mins?|min|m)\b','around'),
+    ]
+    for pat,mode in runtime_patterns:
+        m=re.search(pat,text)
+        if not m: continue
+        value=float(m.group(1)); unit=m.group(2)
+        mins=round(value*60) if unit.startswith(('h','hr','hour')) else round(value)
+        if mode=='max': out['runtime_max']=mins
+        elif mode=='min': out['runtime_min']=mins
+        else:
+            out['runtime_min']=max(1,mins-15); out['runtime_max']=mins+15
+        break
+    if re.search(r'\bshort\s+(?:movie|film)\b',text) and out['runtime_max'] is None:
+        out['runtime_max']=100
+    return out
+
+def _smart_search_interpretation(q):
+    c=_smart_constraints(q); parts=[]
+    if re.search(r'\b(movie|movies|film|films)\b',(q or '').lower()): parts.append('Movie')
+    if c['watched'] is False: parts.append('Unwatched')
+    elif c['watched'] is True: parts.append('Watched')
+    if c['year_min'] is not None:
+        parts.append(str(c['year_min']) if c['year_min']==c['year_max'] else f"{c['year_min']}–{c['year_max']}")
+    parts.extend('Science Fiction' if g=='Sci-Fi' else g for g in c['genres'])
+    if c['runtime_max'] is not None and c['runtime_min'] is None: parts.append(f"Under {c['runtime_max']} minutes")
+    elif c['runtime_min'] is not None and c['runtime_max'] is None: parts.append(f"Over {c['runtime_min']} minutes")
+    elif c['runtime_min'] is not None and c['runtime_max'] is not None:
+        midpoint=round((c['runtime_min']+c['runtime_max'])/2)
+        parts.append(f"Around {midpoint} minutes")
+    return parts
+
+def _lexical_smart_search(q,limit=20,strict=True):
+    terms=_smart_terms(q); constraints=_smart_constraints(q); c=cache_conn()
     try: rows=[dict(r) for r in c.execute('select metadata_id,title,year,summary,genres,duration,watched,size_gb from movies group by metadata_id order by size_gb desc')]
     except sqlite3.OperationalError: rows=[dict(r,summary='',genres='') for r in c.execute('select metadata_id,title,year,duration,watched,size_gb from movies group by metadata_id order by size_gb desc')]
     c.close(); scored=[]
+    structural={'movie','movies','film','films','from','the','with','about','that','this','want','something','watch','please',
+                'under','over','less','more','than','shorter','longer','least','most','up','to','around','roughly','approximately',
+                'hour','hours','hr','hrs','minute','minutes','min','mins'}
+    constraint_words={'funny','comedy','comedies','hilarious','comic','sci','sci-fi','science','fiction','horror','scary','romance','romantic','action','adventure','crime','documentary','drama','fantasy','mystery','thriller','war','western','watched','unwatched','seen','short'}
+    lexical_terms=[t for t in terms if t not in structural and t not in constraint_words and not re.fullmatch(r'(?:19|20)?\d0s?',t) and not t.isdigit()]
     for r in rows:
-        title=(r.get('title') or '').lower(); summary=(r.get('summary') or '').strip(); clean_genres=_clean_genres(r.get('genres'))
-        genres_text=' '.join(clean_genres).lower(); score=0.0; hits=[]
-        for t in terms:
-            if t in title: score+=4; hits.append(t)
-            elif t in genres_text: score+=2.5; hits.append(t)
-            elif t in summary.lower(): score+=1; hits.append(t)
-        if score:
-            r['genre_list']=clean_genres
-            r['genres_display']=' · '.join(clean_genres)
-            r['plex_url']=_plex_web_link(r['metadata_id'])
-            scored.append((score+min(len(set(hits)),5)*.25,r))
+        year=int(r.get('year') or 0)
+        duration_min=round((r.get('duration') or 0)/60000) if r.get('duration') else 0
+        clean_genres=_clean_genres(r.get('genres')); genres_lower={g.lower() for g in clean_genres}
+        summary=(r.get('summary') or '').strip(); title=(r.get('title') or '').lower()
+
+        misses=[]; score=0.0; lexical_hits=set(); genre_hits=0
+        if constraints['year_min'] is not None and not (constraints['year_min'] <= year <= constraints['year_max']): misses.append('year')
+        if constraints['watched'] is not None and bool(r.get('watched')) != constraints['watched']: misses.append('watched')
+        if constraints['runtime_min'] is not None and (not duration_min or duration_min < constraints['runtime_min']): misses.append('runtime')
+        if constraints['runtime_max'] is not None and (not duration_min or duration_min > constraints['runtime_max']): misses.append('runtime')
+
+        for wanted in constraints['genres']:
+            aliases={wanted.lower()}
+            if wanted=='Sci-Fi': aliases|={'science fiction'}
+            if genres_lower & aliases:
+                score+=5.0; genre_hits+=1
+            elif wanted.lower() in summary.lower():
+                score+=1.5
+            else:
+                misses.append('genre')
+
+        # Exact results obey every structured constraint.
+        if strict and misses: continue
+        if not strict:
+            # Closest-match candidates must still honour the core genre intent.
+            # We collect candidates here and choose the least-important relaxed
+            # constraint after scoring: runtime -> watched -> year.
+            unique_misses=set(misses)
+            if 'genre' in unique_misses or len(unique_misses)>1: continue
+            score-=3.0*len(unique_misses)
+
+        for t in lexical_terms:
+            if t in title: score+=4; lexical_hits.add(t)
+            elif t in ' '.join(clean_genres).lower(): score+=2.5; lexical_hits.add(t)
+            elif t in summary.lower(): score+=1; lexical_hits.add(t)
+
+        if score or constraints['year_min'] is not None or constraints['watched'] is not None or constraints['runtime_min'] is not None or constraints['runtime_max'] is not None:
+            score += len(lexical_hits)*.25
+            r['genre_list']=clean_genres; r['genres_display']=' · '.join(clean_genres); r['plex_url']=_plex_web_link(r['metadata_id'])
+            r['runtime_minutes']=duration_min
+            requested_genres=len(constraints['genres'])
+            if requested_genres and genre_hits==requested_genres: score+=2.0
+            r['constraint_misses']=sorted(set(misses))
+            scored.append((score,r,genre_hits,requested_genres))
+
     scored.sort(key=lambda x:x[0],reverse=True)
-    if not scored: return []
-    top=scored[0][0]
+    if not strict:
+        # Do not mix different kinds of compromise on the same results page.
+        # Prefer relaxing runtime, then watched status, then year/decade.
+        relaxation_order=('runtime','watched','year')
+        chosen=None
+        for relax in relaxation_order:
+            if any(set(item[1].get('constraint_misses') or [])=={relax} for item in scored):
+                chosen=relax
+                break
+        if chosen:
+            scored=[item for item in scored if set(item[1].get('constraint_misses') or [])=={chosen}]
+        else:
+            scored=[]
     results=[]
-    for s,r in scored[:limit]:
-        ratio=s/top if top else 0
-        r['match_score']=round(s,2)
-        r['match_label']='Strong match' if ratio>=.75 else ('Good match' if ratio>=.45 else 'Possible match')
-        results.append(r)
+    for s,r,genre_hits,requested_genres in scored[:limit]:
+        if not r.get('constraint_misses') and requested_genres and genre_hits==requested_genres and s>=8: label='Strong match'
+        elif not r.get('constraint_misses') and ((requested_genres and genre_hits) or s>=4): label='Good match'
+        elif r.get('constraint_misses'): label='Closest match'
+        else: label='Possible match'
+        r['match_score']=round(s,2); r['match_label']=label; results.append(r)
     return results
 
-def _smart_search_history(limit=10):
-    c=config(); rows=c.execute('select query,searched_at from smart_search_history order by searched_at desc limit ?',(int(limit),)).fetchall(); c.close()
+def _closest_relaxation(results):
+    if not results: return None
+    misses=results[0].get('constraint_misses') or []
+    if not misses: return None
+    labels={'runtime':'runtime requirement','watched':'watched/unwatched requirement','year':'year requirement'}
+    return labels.get(misses[0],misses[0]+' requirement')
+
+def _smart_search_owner_key():
+    profile=plex_user()
+    if not profile: return 'shared'
+    # Prefer Plex's stable identifiers; never key personal history by display name alone.
+    for key in ('uuid','id'):
+        value=str(profile.get(key) or '').strip()
+        if value: return 'plex:'+value
+    return 'shared'
+
+def _smart_search_history(limit=10,owner_key=None):
+    owner_key=owner_key or _smart_search_owner_key(); c=config()
+    rows=c.execute('select query,searched_at from smart_search_history where owner_key=? order by searched_at desc limit ?',(owner_key,int(limit))).fetchall(); c.close()
     return [dict(r) for r in rows]
 
-def _remember_smart_search(q):
+def _remember_smart_search(q,owner_key=None):
     q=' '.join((q or '').split())[:500]
     if not q: return
-    now=int(time.time()); c=config()
-    c.execute('insert into smart_search_history(query,searched_at) values(?,?) on conflict(query) do update set searched_at=excluded.searched_at',(q,now))
-    # Keep a modest persistent history while displaying only the latest ten.
-    c.execute('delete from smart_search_history where id not in (select id from smart_search_history order by searched_at desc limit 100)')
+    owner_key=owner_key or _smart_search_owner_key(); now=int(time.time()); c=config()
+    c.execute('insert into smart_search_history(query,owner_key,searched_at) values(?,?,?) on conflict(owner_key,query) do update set searched_at=excluded.searched_at',(q,owner_key,now))
+    # Keep up to 100 searches per Plex user (or 100 shared searches when signed out).
+    c.execute('delete from smart_search_history where owner_key=? and id not in (select id from smart_search_history where owner_key=? order by searched_at desc limit 100)',(owner_key,owner_key))
     c.commit(); c.close()
 
 @app.get('/smart-search')
 def smart_search():
-    q=(request.args.get('q') or '').strip()[:500]
-    if q: _remember_smart_search(q)
-    results=_lexical_smart_search(q) if q and cache_ready() else []
-    return render_template('smart_search.html',q=q,results=results,search_history=_smart_search_history())
+    q=(request.args.get('q') or '').strip()[:500]; owner_key=_smart_search_owner_key()
+    show_closest=(request.args.get('closest') or '')=='1'
+    if q: _remember_smart_search(q,owner_key)
+    results=_lexical_smart_search(q,strict=not show_closest) if q and cache_ready() else []
+    interpretation=_smart_search_interpretation(q) if q else []
+    closest_relaxation=_closest_relaxation(results) if show_closest else None
+    return render_template('smart_search.html',q=q,results=results,search_history=_smart_search_history(owner_key=owner_key),
+                           interpretation=interpretation,show_closest=show_closest,closest_relaxation=closest_relaxation)
 
 @app.post('/smart-search/history/clear')
 def smart_search_history_clear():
-    c=config(); c.execute('delete from smart_search_history'); c.commit(); c.close()
+    owner_key=_smart_search_owner_key(); c=config(); c.execute('delete from smart_search_history where owner_key=?',(owner_key,)); c.commit(); c.close()
     flash('Smart Search history cleared.','success')
     return redirect(url_for('smart_search'))
 
@@ -1774,6 +1920,7 @@ def leaving_soon_settings():
 @app.get('/changelog')
 def changelog():
     versions = [
+        ('v2.9.12', 'Smart Search update: year and decade constraints are now honoured, relevance labels use absolute match quality, results rank by relevance instead of favouring newer titles within a decade, and recent searches are separated by signed-in Plex user with shared history for signed-out visitors.'),
         ('v2.9.11', 'Redesigned the Dashboard with a visual welcome hero and mascot shortcuts, introduced a responsive left-hand navigation sidebar, moved account/admin controls to the bottom, and removed duplicated page-heading mascot artwork.'),
         ('v2.9.10', 'Added the MyCouch couch artwork to the dashboard, navigation and section headings, with a light-theme logo and GitHub avatar.'),
         ('v2.9.9', 'Dashboard redesign: Welcome moved to the top, library summary cards moved to Server Stats, Recently Added and Recently Watched poster panels added, split primary/secondary navigation, and retained live Now Playing and Tautulli activity.'),
