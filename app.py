@@ -60,6 +60,9 @@ def config():
         c.execute('drop table smart_search_history_legacy')
     c.execute('create unique index if not exists idx_smart_search_history_owner_query on smart_search_history(owner_key,query)')
     c.execute('create index if not exists idx_smart_search_history_recent on smart_search_history(owner_key,searched_at desc)')
+    c.execute('create table if not exists mobile_auth_pending(state text primary key,pin_id integer not null,created_at integer not null)')
+    c.execute('create table if not exists mobile_auth_codes(code text primary key,profile_json text not null,expires_at integer not null)')
+
     c.execute('create table if not exists discord_posts(id integer primary key autoincrement,category text,item_key text,message text,posted_at integer)')
     c.execute('create index if not exists idx_discord_posts_recent on discord_posts(posted_at)')
     c.execute('create table if not exists leaving_soon(kind text,item_id integer,title text,size_gb real,deadline integer,status text default "announced",discord_posted integer default 0,added_at integer,primary key(kind,item_id))')
@@ -125,7 +128,7 @@ def sort_mark(column):
 app.jinja_env.globals.update(plex_user=plex_user, sort_url=sort_url, sort_mark=sort_mark)
 app.jinja_env.filters['timestamp_date']=lambda v: datetime.fromtimestamp(int(v)).strftime('%d %b %Y') if v else '—'
 
-PUBLIC_ENDPOINTS={'dashboard','movie_page','tv_page','movie_detail','show_detail','changelog','login','logout','setup_admin','static','smart_search','smart_search_poster','now_playing_api','cleanup','plex_signin','plex_callback','plex_logout','my_history'}
+PUBLIC_ENDPOINTS={'dashboard','movie_page','tv_page','movie_detail','show_detail','changelog','login','logout','setup_admin','static','smart_search','smart_search_poster','now_playing_api','cleanup','plex_signin','plex_callback','plex_mobile_callback','plex_mobile_finalize','plex_logout','my_history'}
 
 @app.before_request
 def security_gate():
@@ -200,12 +203,82 @@ def plex_signin():
         r.raise_for_status(); pin=r.json()
         pin_id=int(pin['id']); code=pin['code']
         session['plex_pin_id']=pin_id
-        forward=url_for('plex_callback',pin_id=pin_id,_external=True)
+
+        # MyCouch Mobile must authenticate in the system browser because Google
+        # blocks OAuth sign-in inside embedded WebViews. A one-time bridge lets
+        # the browser return the completed Plex identity to the existing WebView
+        # session without exposing the Plex token to the app.
+        is_mobile='MyCouchMobile/' in (request.headers.get('User-Agent') or '')
+        if is_mobile:
+            state=secrets.token_urlsafe(32)
+            c=config()
+            now=int(time.time())
+            c.execute('delete from mobile_auth_pending where created_at<?',(now-900,))
+            c.execute('delete from mobile_auth_codes where expires_at<?',(now,))
+            c.execute('insert into mobile_auth_pending(state,pin_id,created_at) values(?,?,?)',(state,pin_id,now))
+            c.commit(); c.close()
+            forward=url_for('plex_mobile_callback',pin_id=pin_id,state=state,_external=True)
+        else:
+            forward=url_for('plex_callback',pin_id=pin_id,_external=True)
+
         params={'clientID':headers['X-Plex-Client-Identifier'],'code':code,'context[device][product]':PLEX_AUTH_PRODUCT,'forwardUrl':forward}
         return redirect('https://app.plex.tv/auth#?'+urlencode(params))
     except Exception as e:
         flash('Could not start Plex sign-in: '+str(e),'danger')
         return redirect(url_for('dashboard'))
+
+@app.get('/plex/mobile/callback')
+def plex_mobile_callback():
+    try:
+        pin_id=int(request.args.get('pin_id') or 0)
+        state=(request.args.get('state') or '').strip()
+        now=int(time.time())
+        c=config()
+        row=c.execute('select pin_id,created_at from mobile_auth_pending where state=?',(state,)).fetchone()
+        if not row or int(row['pin_id'])!=pin_id or int(row['created_at']) < now-900:
+            c.close(); raise RuntimeError('Mobile Plex sign-in request expired or did not match')
+        c.execute('delete from mobile_auth_pending where state=?',(state,))
+        c.commit(); c.close()
+
+        headers=_plex_auth_headers()
+        r=requests.get(f'https://plex.tv/api/v2/pins/{pin_id}',headers=headers,timeout=15); r.raise_for_status()
+        token=(r.json() or {}).get('authToken')
+        if not token: raise RuntimeError('Plex sign-in was not completed')
+        uh=dict(headers); uh['X-Plex-Token']=token
+        u=requests.get('https://plex.tv/api/v2/user',headers=uh,timeout=15); u.raise_for_status(); profile=u.json() or {}
+        safe_profile={'id':profile.get('id'),'uuid':profile.get('uuid'),'username':profile.get('username') or '',
+                      'title':profile.get('title') or profile.get('friendlyName') or '',
+                      'email':profile.get('email') or '', 'thumb':profile.get('thumb') or ''}
+
+        auth_code=secrets.token_urlsafe(32)
+        c=config()
+        c.execute('delete from mobile_auth_codes where expires_at<?',(now,))
+        c.execute('insert into mobile_auth_codes(code,profile_json,expires_at) values(?,?,?)',
+                  (auth_code,json.dumps(safe_profile),now+120))
+        c.commit(); c.close()
+        return redirect('mycouch://auth?code='+quote(auth_code))
+    except Exception as e:
+        return Response('MyCouch mobile Plex sign-in failed: '+str(e),status=400,mimetype='text/plain')
+
+
+@app.get('/plex/mobile/finalize')
+def plex_mobile_finalize():
+    code=(request.args.get('code') or '').strip()
+    now=int(time.time())
+    c=config()
+    row=c.execute('select profile_json,expires_at from mobile_auth_codes where code=?',(code,)).fetchone()
+    if not row or int(row['expires_at']) < now:
+        if row: c.execute('delete from mobile_auth_codes where code=?',(code,)); c.commit()
+        c.close()
+        flash('Mobile Plex sign-in expired. Please try again.','danger')
+        return redirect(url_for('dashboard'))
+    c.execute('delete from mobile_auth_codes where code=?',(code,))
+    c.commit(); c.close()
+    session['plex_user']=json.loads(row['profile_json'])
+    session.pop('plex_pin_id',None)
+    flash('Signed in with Plex.','success')
+    return redirect(url_for('my_history'))
+
 
 @app.get('/plex/callback')
 def plex_callback():

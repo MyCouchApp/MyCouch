@@ -73,7 +73,7 @@ code.inline-code{display:inline;padding:.08rem .35rem;margin:0 .12rem;border-rad
 @media(max-width:900px){
   .mc-sidebar{transform:translateX(-100%);transition:transform .2s ease}
   .mc-main{margin-left:0;padding-top:52px}
-  .mc-menu-button{display:block;position:fixed;z-index:1050;top:9px;left:10px;width:42px;height:38px;border:1px solid var(--line);border-radius:9px;background:#1a1e23;color:#fff;font-size:1.25rem}
+  .mc-menu-button{display:block;position:fixed;z-index:1050;top:calc(9px + env(safe-area-inset-top, 0px));left:calc(10px + env(safe-area-inset-left, 0px));width:42px;height:38px;border:1px solid var(--line);border-radius:9px;background:#1a1e23;color:#fff;font-size:1.25rem}
   .mc-sidebar-backdrop{position:fixed;z-index:1035;inset:0;background:#0009}
   body.mc-menu-open .mc-sidebar{transform:translateX(0)}
   body.mc-menu-open .mc-sidebar-backdrop{display:block}
@@ -119,3 +119,94 @@ code.inline-code{display:inline;padding:.08rem .35rem;margin:0 .12rem;border-rad
 .mc-install-button:hover{background:#20252b;color:#ffc947}
 .mc-install-button[hidden]{display:none!important}
 @media(min-width:901px){.mc-menu-button{display:none!important}}
+
+
+/* Mobile/dashboard artwork centering fix */
+img[src*="/static/mascots/"],
+img[src*="/static/mycouch-artwork"] {
+    display: block;
+    margin-left: auto;
+    margin-right: auto;
+    object-position: center center;
+}
+
+.hero img,
+.mc-hero img,
+.dashboard-hero img,
+.hero-art img,
+.hero-image img,
+.dashboard-card img,
+.shortcut-card img,
+.nav-card img,
+.feature-card img {
+    display: block;
+    margin-left: auto;
+    margin-right: auto;
+    object-position: center center;
+}
+
+@media (max-width: 768px) {
+    img[src*="/static/mascots/"],
+    img[src*="/static/mycouch-artwork"],
+    .hero img,
+    .mc-hero img,
+    .dashboard-hero img,
+    .hero-art img,
+    .hero-image img,
+    .dashboard-card img,
+    .shortcut-card img,
+    .nav-card img,
+    .feature-card img {
+        margin-inline: auto;
+        object-position: center center;
+    }
+}
+
+
+
+/* Hero artwork must remain fully visible at every viewport width.
+   Use contain rather than cover so responsive/narrow layouts never crop the arms. */
+.mc-welcome-art {
+    overflow: hidden;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+.mc-welcome-art img,
+.mc-welcome-art img[src*="hero-wide.png"] {
+    display: block;
+    width: 100%;
+    height: auto;
+    max-width: 100%;
+    object-fit: contain !important;
+    object-position: center center !important;
+    margin: 0 auto;
+    transform: none !important;
+}
+
+
+/* Final responsive hero fix:
+   the old mobile .mc-welcome-art max-height clipped the wide artwork. */
+@media (max-width: 780px) {
+    .mc-welcome-art {
+        order: -1;
+        max-height: none !important;
+        height: auto !important;
+        min-height: 0 !important;
+        overflow: visible !important;
+        width: 100%;
+    }
+
+    .mc-welcome-art img,
+    .mc-welcome-art img[src*="hero-wide.png"] {
+        display: block;
+        width: 100%;
+        max-width: 100%;
+        height: auto !important;
+        max-height: none !important;
+        object-fit: contain !important;
+        object-position: center center !important;
+        margin: 0 auto;
+        transform: none !important;
+    }
+}
