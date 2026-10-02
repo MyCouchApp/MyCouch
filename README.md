@@ -75,7 +75,7 @@ These prepared screenshots show the v2.9.9 layout before the couch artwork was a
 
 ### Movies
 
-![Movies library](docs/screenshots/movies.png)
+![Movies library](docs/screenshots/Movies.png)
 
 ## Fresh install on Windows
 
