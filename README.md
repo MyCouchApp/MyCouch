@@ -63,7 +63,7 @@ These prepared screenshots show the v2.9.9 layout before the couch artwork was a
 
 ### Dashboard
 
-![Dashboard with Recently Added and Recently Watched posters](docs/screenshots/dashboard.png)
+![Dashboard with Recently Added and Recently Watched posters](docs/screenshots/Dashboard.png)
 
 ### My History
 
