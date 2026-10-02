@@ -2016,6 +2016,7 @@ def leaving_soon_settings():
 @app.get('/changelog')
 def changelog():
     versions = [
+        ('v2.9.13', 'Server Stats visual refresh: Popular Movies and Popular TV are now compact Top 10 poster grids with ranking badges and hover activity details. Movie and TV detail pages have richer artwork, metadata, activity, storage and quality information. Historical Tautulli titles are retained locally and old Plex rating keys can be relinked to the current title/year match, restoring current artwork and working detail links without slowing Dashboard loads.'),
         ('v2.9.12', 'Smart Search update: year and decade constraints are now honoured, relevance labels use absolute match quality, results rank by relevance instead of favouring newer titles within a decade, and recent searches are separated by signed-in Plex user with shared history for signed-out visitors.'),
         ('v2.9.11', 'Redesigned the Dashboard with a visual welcome hero and mascot shortcuts, introduced a responsive left-hand navigation sidebar, moved account/admin controls to the bottom, and removed duplicated page-heading mascot artwork.'),
         ('v2.9.10', 'Added the MyCouch couch artwork to the dashboard, navigation and section headings, with a light-theme logo and GitHub avatar.'),
