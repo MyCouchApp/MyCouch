@@ -52,7 +52,46 @@
 <section class="panel mb-4"><form action="/smart-search" method="get" class="smart-search-submit-form"><label class="form-label fw-semibold">Smart Search</label><div class="input-group input-group-lg"><input class="form-control" name="q" placeholder="Try: man stuck in wilderness and struggles to get home"><button class="btn btn-primary smart-search-submit-button">Search Plex</button></div><div class="smart-search-submit-progress mt-3 d-none"><div class="small mb-1">Searching your Plex library…</div><div class="progress"><div class="progress-bar progress-bar-striped progress-bar-animated" style="width:100%"></div></div></div><div class="small text-muted mt-2">Natural-language discovery across movies already in your Plex library.</div></form></section>
 <section class="panel mb-4"><div class="d-flex justify-content-between align-items-center"><div><h3 class="mb-1">What’s Playing on MyCouch?</h3><div class="small text-muted">Live from Tautulli · viewer identities hidden on the public dashboard</div></div><span id="nowCount" class="badge text-bg-secondary">…</span></div><div id="nowPlaying" class="row g-3 mt-1"><div class="col-12 text-muted"><span class="spinner-border spinner-border-sm me-2" aria-hidden="true"></span>Loading current streams…</div></div></section>
 {% if stats %}
-<section class="panel mb-4"><div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-3"><div><h3 class="mb-1">Tautulli activity</h3><div class="text-muted small">All Plex users · last synced {{tautulli_last_sync}}</div></div><form method="get"><select class="form-select" name="activity_days" onchange="this.form.submit()"><option value="7" {% if stats.days==7 %}selected{% endif %}>Last 7 days</option><option value="30" {% if stats.days==30 %}selected{% endif %}>Last 30 days</option><option value="90" {% if stats.days==90 %}selected{% endif %}>Last 90 days</option><option value="365" {% if stats.days==365 %}selected{% endif %}>Last year</option><option value="0" {% if stats.days==0 %}selected{% endif %}>All Time</option></select></form></div><div class="row g-3 mb-4"><div class="col-md-6 col-xl-3"><div class="metric"><span>Viewing hours</span><strong>{{stats.hours}}</strong><small>{{stats.plays|int}} plays</small></div></div><div class="col-md-6 col-xl-3"><div class="metric"><span>Active users</span><strong>{{stats.users}}</strong><small>unique viewers</small></div></div><div class="col-md-6 col-xl-3"><div class="metric"><span>Movie plays</span><strong>{{stats.movies}}</strong><small>completed/history plays</small></div></div><div class="col-md-6 col-xl-3"><div class="metric"><span>TV plays</span><strong>{{stats.episodes}}</strong><small>episode history plays</small></div></div></div><div class="row g-4"><div class="col-lg-6"><h5>Popular movies</h5><div class="table-responsive"><table class="table table-sm align-middle"><thead><tr><th>Movie</th><th class="text-end">Viewers</th><th class="text-end">Plays</th><th class="text-end">Hours</th></tr></thead><tbody>{% for x in stats.popular_movies %}<tr><td><a href="/movie/{{x.item_id}}">{{x.title}}</a>{% if x.year %} <span class="text-muted">({{x.year}})</span>{% endif %}</td><td class="text-end">{{x.viewers}}</td><td class="text-end">{{x.plays}}</td><td class="text-end">{{'%.1f'|format(x.duration/3600)}}</td></tr>{% else %}<tr><td colspan="4" class="text-muted">No activity in this period.</td></tr>{% endfor %}</tbody></table></div></div><div class="col-lg-6"><h5>Popular TV</h5><div class="table-responsive"><table class="table table-sm align-middle"><thead><tr><th>Show</th><th class="text-end">Viewers</th><th class="text-end">Plays</th><th class="text-end">Hours</th></tr></thead><tbody>{% for x in stats.popular_tv %}<tr><td><a href="/show/{{x.item_id}}">{{x.title}}</a>{% if x.year %} <span class="text-muted">({{x.year}})</span>{% endif %}</td><td class="text-end">{{x.viewers}}</td><td class="text-end">{{x.plays}}</td><td class="text-end">{{'%.1f'|format(x.duration/3600)}}</td></tr>{% else %}<tr><td colspan="4" class="text-muted">No activity in this period.</td></tr>{% endfor %}</tbody></table></div></div></div></section>
+<section class="panel mb-4"><div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-3"><div><h3 class="mb-1">Tautulli activity</h3><div class="text-muted small">All Plex users · last synced {{tautulli_last_sync}}</div></div><form method="get"><select class="form-select" name="activity_days" onchange="this.form.submit()"><option value="7" {% if stats.days==7 %}selected{% endif %}>Last 7 days</option><option value="30" {% if stats.days==30 %}selected{% endif %}>Last 30 days</option><option value="90" {% if stats.days==90 %}selected{% endif %}>Last 90 days</option><option value="365" {% if stats.days==365 %}selected{% endif %}>Last year</option><option value="0" {% if stats.days==0 %}selected{% endif %}>All Time</option></select></form></div><div class="row g-3 mb-4"><div class="col-md-6 col-xl-3"><div class="metric"><span>Viewing hours</span><strong>{{stats.hours}}</strong><small>{{stats.plays|int}} plays</small></div></div><div class="col-md-6 col-xl-3"><div class="metric"><span>Active users</span><strong>{{stats.users}}</strong><small>unique viewers</small></div></div><div class="col-md-6 col-xl-3"><div class="metric"><span>Movie plays</span><strong>{{stats.movies}}</strong><small>completed/history plays</small></div></div><div class="col-md-6 col-xl-3"><div class="metric"><span>TV plays</span><strong>{{stats.episodes}}</strong><small>episode history plays</small></div></div></div><div class="popular-media-grid">
+  <div>
+    <div class="popular-section-head"><div><h5>Popular movies</h5><small>Most watched in this period</small></div><a href="/movies?filter=popular_{{stats.days if stats.days else 'all'}}">View all →</a></div>
+    <div class="popular-poster-grid">
+      {% for x in stats.popular_movies[:10] %}
+      <a class="popular-poster-card" href="/movie/{{x.current_item_id or x.item_id}}">
+        <span class="popular-rank">#{{loop.index}}</span>
+        <img src="{{ url_for('smart_search_poster', item_id=(x.current_item_id or x.item_id)) }}" alt="{{x.title}} poster" loading="lazy">
+        <span class="popular-card-title">{{x.title}}{% if x.year %} <em>{{x.year}}</em>{% endif %}</span>
+        <span class="media-hover-card">
+          <strong>{{x.title}}</strong>
+          {% if x.year %}<span>{{x.year}} · Movie</span>{% endif %}
+          <span><b>{{x.viewers}}</b> viewers · <b>{{x.plays}}</b> plays</span>
+          <span><b>{{'%.1f'|format(x.duration/3600)}}</b> viewing hours</span>
+          <small>Open details →</small>
+        </span>
+      </a>
+      {% else %}<div class="muted">No movie activity in this period.</div>{% endfor %}
+    </div>
+  </div>
+  <div>
+    <div class="popular-section-head"><div><h5>Popular TV</h5><small>Most watched in this period</small></div><a href="/tv?filter=popular_{{stats.days if stats.days else 'all'}}">View all →</a></div>
+    <div class="popular-poster-grid">
+      {% for x in stats.popular_tv[:10] %}
+      <a class="popular-poster-card" href="/show/{{x.current_item_id or x.item_id}}">
+        <span class="popular-rank">#{{loop.index}}</span>
+        <img src="{{ url_for('smart_search_poster', item_id=(x.current_item_id or x.item_id)) }}" alt="{{x.title}} poster" loading="lazy">
+        <span class="popular-card-title">{{x.title}}{% if x.year %} <em>{{x.year}}</em>{% endif %}</span>
+        <span class="media-hover-card">
+          <strong>{{x.title}}</strong>
+          {% if x.year %}<span>{{x.year}} · TV Show</span>{% endif %}
+          <span><b>{{x.viewers}}</b> viewers · <b>{{x.plays}}</b> plays</span>
+          <span><b>{{'%.1f'|format(x.duration/3600)}}</b> viewing hours</span>
+          <small>Open details →</small>
+        </span>
+      </a>
+      {% else %}<div class="muted">No TV activity in this period.</div>{% endfor %}
+    </div>
+  </div>
+</div></section>
 {% else %}<section class="panel mb-4"><h3>Tautulli activity</h3><p class="text-muted mb-0">Run a Full Rescan in Settings to enable multi-user dashboard statistics.</p></section>{% endif %}
 {% if is_admin() %}<section class="panel"><div class="d-flex flex-wrap justify-content-between align-items-center gap-3"><div><h3 class="mb-1">Admin</h3><p class="text-muted mb-0">{{review_count}} items are currently in the Review Queue.</p></div><div class="d-flex gap-2"><a href="/review" class="btn btn-outline-secondary">Review Queue</a><a href="/cleanup" class="btn btn-primary">Open Server Stats</a></div></div></section>{% endif %}
 <script>

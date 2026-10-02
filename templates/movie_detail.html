@@ -1,1 +1,34 @@
-{% extends 'base.html' %}{% block content %}<a href="javascript:history.back()" class="back">← Back</a><div class="detail-hero mt-2 mb-4"><div class="detail-poster-wrap"><img src="{{ url_for('smart_search_poster', item_id=m.metadata_id) }}" class="detail-poster" alt="{{m.title}} poster" onerror="this.style.display='none';this.nextElementSibling.style.display='flex'"><div class="detail-poster-fallback" style="display:none">No poster</div></div><div class="flex-grow-1"><div class="page-head mb-2"><div><h1>{{m.title}} <span class="muted">({{m.year}})</span></h1><p class="muted">{{m.library}}</p></div></div><div class="d-flex gap-2 flex-wrap">{% if m.plex_url %}<a class="btn btn-warning" href="{{m.plex_url}}" target="_blank" rel="noopener">▶ Open in Plex</a>{% endif %}{% if m.arr_url %}{% if is_admin() %}<a class="btn btn-outline-info" href="{{m.arr_url}}" target="_blank">Open in Radarr ↗</a>{% else %}<span class="badge text-bg-success align-self-center">Radarr matched</span>{% endif %}{% elif m.arr_status=='alternate' %}<span class="badge text-bg-warning align-self-center">Alternate / duplicate?</span>{% else %}<span class="badge text-bg-secondary align-self-center">Not in Radarr</span>{% endif %}</div></div></div><div class="row g-3 mb-4"><div class="col-md"><div class="metric"><span>Total size</span><strong>{{total_gb}} GB</strong><small>{{versions|length}} file(s)</small></div></div><div class="col-md"><div class="metric"><span>Tautulli activity</span><strong>{{m.tautulli.plays if m.tautulli else 0}} plays</strong><small>{% if is_admin() %}{{m.tautulli.last_user if m.tautulli else 'Never watched by anyone'}}{% else %}{{'Aggregate activity' if m.tautulli else 'Never watched by anyone'}}{% endif %}</small></div></div><div class="col-md"><div class="metric"><span>Quality</span><strong>{{m.resolution}}</strong><small>{{m.codec}} · {{m.audio_codec}}</small></div></div></div><section class="panel"><h3>Media files</h3>{% for v in versions %}<div class="file-row"><div><b>{{v.resolution}} · {{v.codec}} · {{v.size_gb}} GB</b>{% if is_admin() %}<code>{{v.path}}</code>{% else %}<small class="text-secondary d-block">File path hidden on public view</small>{% endif %}</div></div>{% endfor %}</section>{% endblock %}
+{% extends 'base.html' %}{% block content %}
+<a href="javascript:history.back()" class="back">← Back</a>
+<section class="title-detail-hero">
+  <div class="title-detail-poster"><img src="{{ url_for('smart_search_poster', item_id=m.metadata_id) }}" alt="{{m.title}} poster"><span class="poster-fallback">No poster</span></div>
+  <div class="title-detail-copy">
+    <div class="detail-eyebrow">Movie{% if m.library %} · {{m.library}}{% endif %}</div>
+    <h1>{{m.title}} {% if m.year %}<span>{{m.year}}</span>{% endif %}</h1>
+    <div class="detail-meta">
+      {% if m.runtime_minutes %}<span>{{m.runtime_minutes}} min</span>{% endif %}
+      {% if m.resolution %}<span>{{m.resolution}}</span>{% endif %}
+      {% if m.codec %}<span>{{m.codec|upper}}</span>{% endif %}
+      <span>{{total_gb}} GB</span>
+    </div>
+    {% if m.genre_list %}<div class="detail-genres">{% for g in m.genre_list %}<span>{{g}}</span>{% endfor %}</div>{% endif %}
+    {% if m.summary %}<p class="detail-summary">{{m.summary}}</p>{% else %}<p class="detail-summary muted">No synopsis is available from Plex for this title.</p>{% endif %}
+    <div class="detail-actions">
+      {% if m.plex_url %}<a class="btn btn-warning" href="{{m.plex_url}}" target="_blank" rel="noopener">▶ Open in Plex</a>{% endif %}
+      {% if m.arr_url and is_admin() %}<a class="btn btn-outline-info" href="{{m.arr_url}}" target="_blank">Open in Radarr ↗</a>
+      {% elif m.arr_url %}<span class="badge text-bg-success">Radarr matched</span>
+      {% elif m.arr_status=='alternate' %}<span class="badge text-bg-warning">Alternate / duplicate?</span>
+      {% else %}<span class="badge text-bg-secondary">Not in Radarr</span>{% endif %}
+    </div>
+  </div>
+</section>
+<div class="detail-stat-grid">
+  <div class="metric"><span>Tautulli activity</span><strong>{{m.tautulli.plays if m.tautulli else 0}} plays</strong><small>{% if is_admin() %}{{m.tautulli.last_user if m.tautulli else 'Never watched by anyone'}}{% else %}{{'Aggregate activity' if m.tautulli else 'Never watched by anyone'}}{% endif %}</small></div>
+  <div class="metric"><span>Storage</span><strong>{{total_gb}} GB</strong><small>{{versions|length}} file{{'' if versions|length == 1 else 's'}}</small></div>
+  <div class="metric"><span>Video</span><strong>{{m.resolution or 'Unknown'}}</strong><small>{{m.codec or 'Unknown codec'}} · {{m.audio_codec or 'Unknown audio'}}</small></div>
+  <div class="metric"><span>Plex status</span><strong>{{'Watched' if m.watched else 'Unwatched'}}</strong><small>Library status</small></div>
+</div>
+<section class="panel detail-files"><div class="section-title"><div><h3>Media files</h3><p>Versions currently stored in Plex</p></div></div>
+{% for v in versions %}<div class="file-row detail-file-row"><div><b>{{v.resolution}} · {{v.codec}} · {{v.size_gb}} GB</b><small>{{v.audio_codec or 'Unknown audio'}}{% if v.bitrate %} · {{(v.bitrate/1000)|round(1)}} Mbps{% endif %}</small>{% if is_admin() %}<code>{{v.path}}</code>{% else %}<small>File path hidden on public view</small>{% endif %}</div></div>{% endfor %}
+</section>
+{% endblock %}

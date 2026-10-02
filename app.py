@@ -21,7 +21,7 @@ def _app_secret():
 app=Flask(__name__); app.secret_key=_app_secret()
 app.config.update(SESSION_COOKIE_HTTPONLY=True,SESSION_COOKIE_SAMESITE='Lax',SESSION_COOKIE_SECURE=(os.environ.get('MYCOUCH_SECURE_COOKIE') or os.environ.get('PLA_SECURE_COOKIE','0'))=='1')
 BUILD_LOCK=threading.Lock()
-APP_VERSION='2.9.12'
+APP_VERSION='2.9.13'
 PLEX_UPDATE_STATUS={'running':False,'last_update':None,'error':None}
 SMART_LOCK=threading.Lock(); SMART_MODEL=None; SMART_VECTORS=None; SMART_IDS=None
 BUILD_STATUS={'running':False,'stage':'Idle','percent':0,'current':0,'total':0,'message':'','started_at':None,'elapsed':0,'error':None,'complete':False}
@@ -68,6 +68,7 @@ def config():
     c.execute('create table if not exists leaving_soon(kind text,item_id integer,title text,size_gb real,deadline integer,status text default "announced",discord_posted integer default 0,added_at integer,primary key(kind,item_id))')
     c.execute('create table if not exists tautulli_activity(kind text,item_id integer,plays integer default 0,last_watched integer,last_user text,users_json text,synced_at text default current_timestamp,primary key(kind,item_id))')
     c.execute('create table if not exists tautulli_history(event_key text primary key,kind text,item_id integer,watched_at integer,user text,duration integer default 0,media_type text,transcode_decision text)')
+    c.execute('create table if not exists tautulli_media_identity(kind text,item_id integer,title text,year integer,current_item_id integer,updated_at text default current_timestamp,primary key(kind,item_id))')
     c.execute('create index if not exists idx_tautulli_history_date on tautulli_history(watched_at)')
     c.execute('create index if not exists idx_tautulli_history_item on tautulli_history(kind,item_id)')
     c.execute('create table if not exists arr_matches(kind text,item_id integer,arr_id integer,title_slug text,arr_title text,arr_path text,matched_by text,synced_at text default current_timestamp,primary key(kind,item_id))')
@@ -393,7 +394,11 @@ def _history_event(h):
     except (TypeError,ValueError): duration=0
     raw_id=h.get('row_id') or h.get('history_id') or h.get('id')
     key=str(raw_id) if raw_id is not None else '|'.join(map(str,(kind,item_id,ts,user,h.get('session_key') or '',h.get('reference_id') or '')))
-    return key,kind,item_id,ts,user,duration,mt,(h.get('transcode_decision') or '')
+    title=(h.get('grandparent_title') or h.get('grandparentTitle')) if mt=='episode' else (h.get('title') or h.get('full_title'))
+    year=(h.get('grandparent_year') or h.get('year')) if mt=='episode' else h.get('year')
+    try: year=int(year) if year not in (None,'') else None
+    except (TypeError,ValueError): year=None
+    return key,kind,item_id,ts,user,duration,mt,(h.get('transcode_decision') or ''),title,year
 
 def rebuild_tautulli_activity(c):
     c.execute('delete from tautulli_activity')
@@ -421,7 +426,10 @@ def sync_tautulli(full=False):
                 for h in batch:
                     ev=_history_event(h)
                     if not ev: continue
-                    c.execute('insert or ignore into tautulli_history(event_key,kind,item_id,watched_at,user,duration,media_type,transcode_decision) values(?,?,?,?,?,?,?,?)',ev); newest_seen=max(newest_seen,ev[3])
+                    c.execute('insert or ignore into tautulli_history(event_key,kind,item_id,watched_at,user,duration,media_type,transcode_decision) values(?,?,?,?,?,?,?,?)',ev[:8])
+                    if ev[8]:
+                        c.execute('insert into tautulli_media_identity(kind,item_id,title,year,updated_at) values(?,?,?,?,current_timestamp) on conflict(kind,item_id) do update set title=excluded.title,year=coalesce(excluded.year,tautulli_media_identity.year),updated_at=current_timestamp',(ev[1],ev[2],ev[8],ev[9]))
+                    newest_seen=max(newest_seen,ev[3])
                 c.commit(); start+=len(batch)
                 set_tautulli_status(stage='Loading history',percent=5+int(70*start/max(total,1)),current=start,total=total,message=f'Loaded {start:,} / {total:,} history records')
                 if start>=total: break
@@ -435,7 +443,10 @@ def sync_tautulli(full=False):
                     ev=_history_event(h)
                     if not ev: continue
                     if ev[3] <= cursor: stop=True; continue
-                    c.execute('insert or ignore into tautulli_history(event_key,kind,item_id,watched_at,user,duration,media_type,transcode_decision) values(?,?,?,?,?,?,?,?)',ev); newest_seen=max(newest_seen,ev[3]); loaded+=1
+                    c.execute('insert or ignore into tautulli_history(event_key,kind,item_id,watched_at,user,duration,media_type,transcode_decision) values(?,?,?,?,?,?,?,?)',ev[:8])
+                    if ev[8]:
+                        c.execute('insert into tautulli_media_identity(kind,item_id,title,year,updated_at) values(?,?,?,?,current_timestamp) on conflict(kind,item_id) do update set title=excluded.title,year=coalesce(excluded.year,tautulli_media_identity.year),updated_at=current_timestamp',(ev[1],ev[2],ev[8],ev[9]))
+                    newest_seen=max(newest_seen,ev[3]); loaded+=1
                 c.commit(); start+=len(batch)
                 set_tautulli_status(stage='Loading new history',percent=min(75,10+start//10),current=loaded,total=max(loaded,1),message=f'Found {loaded:,} new history records')
                 if stop or len(batch)<1000: break
@@ -461,32 +472,39 @@ def tautulli_dashboard_stats(days=30):
     tvplays=c.execute("select count(*) n from tautulli_history where watched_at>=? and kind='tv'",(cutoff,)).fetchone()['n']
     pm=[dict(r) for r in c.execute("select item_id,count(*) plays,count(distinct user) viewers,coalesce(sum(duration),0) duration,max(watched_at) last_watched from tautulli_history where watched_at>=? and kind='movie' group by item_id order by viewers desc,plays desc limit 10",(cutoff,))]
     pt=[dict(r) for r in c.execute("select item_id,count(*) plays,count(distinct user) viewers,coalesce(sum(duration),0) duration,max(watched_at) last_watched from tautulli_history where watched_at>=? and kind='tv' group by item_id order by viewers desc,plays desc limit 10",(cutoff,))]
+    identities={(r['kind'],r['item_id']):dict(r) for r in c.execute('select kind,item_id,title,year,current_item_id from tautulli_media_identity')}
     c.close()
+
+    # Dashboard resolution is deliberately local-only: never call Plex/Tautulli over HTTP here.
     if cache_ready():
         cc=cache_conn()
-        unresolved=[]
-        for r in pm:
-            x=cc.execute('select title,year from movies where metadata_id=? limit 1',(r['item_id'],)).fetchone()
-            if x: r['title'],r['year']=x['title'],x['year']
-            else: r['title'],r['year']=None,None; unresolved.append(r)
-        for r in pt:
-            x=cc.execute('select title,year from shows where show_id=? limit 1',(r['item_id'],)).fetchone()
-            if x: r['title'],r['year']=x['title'],x['year']
-            else: r['title'],r['year']=None,None; unresolved.append(r)
+        for kind,rows,table,idcol in (('movie',pm,'movies','metadata_id'),('tv',pt,'shows','show_id')):
+            for r in rows:
+                x=cc.execute(f'select title,year,{idcol} current_id from {table} where {idcol}=? limit 1',(r['item_id'],)).fetchone()
+                if x:
+                    r['title'],r['year'],r['current_item_id']=x['title'],x['year'],x['current_id']
+                    continue
+
+                ident=identities.get((kind,r['item_id']))
+                if ident and ident.get('title'):
+                    r['title'],r['year']=ident['title'],ident.get('year')
+                    # A Plex ratingKey can change. Relink by normalized title + year to
+                    # the current cache so artwork/details use the live Plex item.
+                    title=ident['title'].strip()
+                    year=ident.get('year')
+                    if year:
+                        nx=cc.execute(f'select title,year,{idcol} current_id from {table} where lower(trim(title))=lower(trim(?)) and year=? limit 2',(title,year)).fetchall()
+                    else:
+                        nx=cc.execute(f'select title,year,{idcol} current_id from {table} where lower(trim(title))=lower(trim(?)) limit 2',(title,)).fetchall()
+                    if len(nx)==1:
+                        r['current_item_id']=nx[0]['current_id']
+                        r['title'],r['year']=nx[0]['title'],nx[0]['year']
+                        r['relinked']=True
+                    else:
+                        r['removed']=True
+                else:
+                    r['title']='No longer in library'; r['year']=None; r['removed']=True
         cc.close()
-        # History can refer to media that has since left the current cache. Try the Plex source
-        # metadata table before falling back to a non-identifying unavailable-item label.
-        if unresolved:
-            try:
-                pc=source_conn()
-                for r in unresolved:
-                    x=pc.execute('select title,year from metadata_items where id=? limit 1',(r['item_id'],)).fetchone()
-                    if x: r['title'],r['year']=x['title'],x['year']
-                pc.close()
-            except Exception:
-                pass
-            for r in unresolved:
-                if not r.get('title'): r['title']=f"Unavailable Plex item #{r['item_id']}"
     return {'days':days,'plays':total['n'],'hours':round((total['d'] or 0)/3600,1),'users':users,'movies':movies,'episodes':tvplays,'popular_movies':pm,'popular_tv':pt}
 
 def _scheduler_loop():
@@ -1701,8 +1719,11 @@ def movie_detail(item_id):
     rows=qcache('select * from movies where metadata_id=? order by size_gb desc',(item_id,))
     if not rows: abort(404)
     _enrich_movies(rows)
-    rows[0]['plex_url']=_plex_web_link(item_id)
-    return render_template('movie_detail.html',m=rows[0],versions=rows,total_gb=round(sum(x['size_gb'] for x in rows),2))
+    m=rows[0]
+    m['plex_url']=_plex_web_link(item_id)
+    m['genre_list']=_clean_genres(m.get('genres'))
+    m['runtime_minutes']=round((m.get('duration') or 0)/60000) if (m.get('duration') or 0) > 10000 else round((m.get('duration') or 0)/60)
+    return render_template('movie_detail.html',m=m,versions=rows,total_gb=round(sum(x['size_gb'] for x in rows),2))
 
 @app.route('/show/<int:item_id>')
 def show_detail(item_id):
@@ -1711,7 +1732,9 @@ def show_detail(item_id):
     _enrich_shows(rows); s=rows[0]
     s['plex_url']=_plex_web_link(item_id)
     eps=qcache('select * from episodes where show_id=? order by season,episode',(item_id,))
-    return render_template('show_detail.html',s=s,episodes=eps)
+    seasons=len({e['season'] for e in eps if e.get('season') is not None})
+    watched=sum(1 for e in eps if e.get('watched'))
+    return render_template('show_detail.html',s=s,episodes=eps,seasons=seasons,watched=watched)
 
 @app.post('/protect')
 def protect():

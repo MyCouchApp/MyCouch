@@ -210,3 +210,87 @@ img[src*="/static/mycouch-artwork"] {
         transform: none !important;
     }
 }
+
+
+/* v2.9.13 — visual popularity cards and richer title details */
+.popular-media-grid{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:28px}
+.popular-section-head{display:flex;justify-content:space-between;align-items:end;gap:16px;margin-bottom:14px}
+.popular-section-head h5{margin:0 0 2px}.popular-section-head small{color:var(--muted)}
+.popular-section-head>a{font-size:.86rem;text-decoration:none;white-space:nowrap}
+.popular-poster-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:14px}
+.popular-poster-card{position:relative;min-width:0;text-decoration:none;color:inherit;border-radius:14px;background:var(--panel);border:1px solid var(--border);overflow:visible;transition:transform .16s ease,border-color .16s ease,box-shadow .16s ease}
+.popular-poster-card>img{display:block;width:100%;aspect-ratio:2/3;object-fit:cover;border-radius:13px 13px 0 0;background:#111}
+.popular-card-title{display:block;padding:9px 10px 11px;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.popular-card-title em{font-style:normal;font-weight:400;color:var(--muted)}
+.popular-rank{position:absolute;z-index:3;top:8px;left:8px;background:rgba(10,13,17,.86);color:#fff;border:1px solid rgba(255,255,255,.16);border-radius:999px;padding:3px 8px;font-size:.78rem;font-weight:800;backdrop-filter:blur(8px)}
+.popular-poster-card:hover{transform:translateY(-3px);border-color:rgba(255,255,255,.25);box-shadow:0 16px 34px rgba(0,0,0,.3)}
+.media-hover-card{position:absolute;z-index:20;left:50%;bottom:calc(100% - 12px);width:230px;max-width:80vw;transform:translate(-50%,8px);display:flex;flex-direction:column;gap:5px;padding:13px 14px;border-radius:12px;background:rgba(17,21,27,.97);border:1px solid rgba(255,255,255,.15);box-shadow:0 18px 44px rgba(0,0,0,.45);opacity:0;visibility:hidden;pointer-events:none;transition:.16s ease;color:#f5f7fa;text-align:left}
+.media-hover-card strong{font-size:.98rem}.media-hover-card span{font-size:.8rem;color:#bdc6d2}.media-hover-card small{margin-top:4px;color:#79b8ff}
+.popular-poster-card:hover .media-hover-card,.popular-poster-card:focus-visible .media-hover-card{opacity:1;visibility:visible;transform:translate(-50%,0)}
+.title-detail-hero{display:grid;grid-template-columns:210px minmax(0,1fr);gap:32px;align-items:end;margin:14px 0 28px;padding:26px;border:1px solid var(--border);border-radius:18px;background:linear-gradient(120deg,var(--panel),rgba(255,255,255,.018))}
+.title-detail-poster{position:relative}.title-detail-poster img{display:block;width:100%;aspect-ratio:2/3;object-fit:cover;border-radius:14px;box-shadow:0 16px 38px rgba(0,0,0,.35)}
+.poster-fallback{display:none;aspect-ratio:2/3;align-items:center;justify-content:center;border-radius:14px;background:var(--panel);color:var(--muted)}
+.title-detail-poster img[style*="display: none"]+.poster-fallback{display:flex}
+.title-detail-copy h1{font-size:clamp(2rem,4vw,3.6rem);line-height:1.02;margin:5px 0 12px}.title-detail-copy h1 span{color:var(--muted);font-weight:500}
+.detail-eyebrow{text-transform:uppercase;letter-spacing:.1em;color:var(--muted);font-size:.76rem;font-weight:800}
+.detail-meta{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:13px}.detail-meta span,.detail-genres span{padding:5px 9px;border:1px solid var(--border);border-radius:999px;background:rgba(255,255,255,.025);font-size:.82rem}
+.detail-genres{display:flex;gap:7px;flex-wrap:wrap;margin-bottom:15px}.detail-summary{max-width:850px;font-size:1rem;line-height:1.65;color:var(--text-secondary,#c5ccd6)}
+.detail-actions{display:flex;align-items:center;gap:9px;flex-wrap:wrap;margin-top:18px}
+.detail-stat-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:14px;margin-bottom:24px}
+.detail-files .section-title{display:flex;justify-content:space-between;align-items:end;margin-bottom:10px}.detail-files .section-title h3{margin:0}.detail-files .section-title p{margin:2px 0 0;color:var(--muted);font-size:.85rem}
+.detail-file-row small{display:block;color:var(--muted);margin-top:4px}.detail-file-row code{display:block;margin-top:6px;overflow-wrap:anywhere}
+.episode-table td,.episode-table th{vertical-align:middle}
+@media(max-width:1050px){.popular-poster-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.detail-stat-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}
+@media(max-width:780px){.popular-media-grid{grid-template-columns:1fr}.popular-poster-grid{grid-template-columns:repeat(3,minmax(0,1fr));gap:10px}.media-hover-card{display:none}.title-detail-hero{grid-template-columns:120px minmax(0,1fr);gap:18px;padding:16px;align-items:start}.title-detail-copy h1{font-size:1.75rem}.detail-summary{grid-column:1/-1}.detail-stat-grid{grid-template-columns:1fr 1fr}}
+@media(max-width:480px){.popular-poster-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.title-detail-hero{grid-template-columns:95px minmax(0,1fr)}.detail-stat-grid{grid-template-columns:1fr}}
+
+
+/* v2.9.13 — Popular media cards match the compact Dashboard poster scale */
+.popular-poster-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(118px, 142px));
+    gap: 14px;
+    justify-content: start;
+    align-items: start;
+}
+
+.popular-poster-card {
+    width: 100%;
+    max-width: 142px;
+}
+
+.popular-poster-card > img {
+    width: 100%;
+    aspect-ratio: 2 / 3;
+    object-fit: cover;
+}
+
+@media (max-width: 1050px) {
+    .popular-poster-grid {
+        grid-template-columns: repeat(auto-fill, minmax(112px, 136px));
+    }
+    .popular-poster-card {
+        max-width: 136px;
+    }
+}
+
+@media (max-width: 780px) {
+    .popular-poster-grid {
+        grid-template-columns: repeat(auto-fill, minmax(105px, 1fr));
+    }
+    .popular-poster-card {
+        max-width: 142px;
+    }
+}
+
+@media (max-width: 480px) {
+    .popular-poster-grid {
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        gap: 9px;
+    }
+    .popular-poster-card {
+        max-width: none;
+    }
+}
+
+.popular-poster-card img{background:linear-gradient(145deg,#181d25,#0f1319)}

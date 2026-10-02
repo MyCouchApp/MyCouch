@@ -1,1 +1,29 @@
-{% extends 'base.html' %}{% block content %}<a href="javascript:history.back()" class="back">← Back</a><div class="detail-hero mt-2 mb-4"><div class="detail-poster-wrap"><img src="{{ url_for('smart_search_poster', item_id=s.show_id) }}" class="detail-poster" alt="{{s.title}} poster" onerror="this.style.display='none';this.nextElementSibling.style.display='flex'"><div class="detail-poster-fallback" style="display:none">No poster</div></div><div class="flex-grow-1"><div class="page-head mb-2"><div><h1>{{s.title}} <span class="muted">({{s.year}})</span></h1><p class="muted">{{s.library}}</p></div></div><div class="d-flex gap-2 flex-wrap">{% if s.plex_url %}<a class="btn btn-warning" href="{{s.plex_url}}" target="_blank" rel="noopener">▶ Open in Plex</a>{% endif %}{% if s.arr_url %}{% if is_admin() %}<a class="btn btn-outline-info" href="{{s.arr_url}}" target="_blank">Open in Sonarr ↗</a>{% else %}<span class="badge text-bg-success align-self-center">Sonarr matched</span>{% endif %}{% elif s.arr_status=='alternate' %}<span class="badge text-bg-warning align-self-center">Alternate / duplicate?</span>{% else %}<span class="badge text-bg-secondary align-self-center">Not in Sonarr</span>{% endif %}</div></div></div><div class="row g-3 mb-4"><div class="col-md"><div class="metric"><span>Storage</span><strong>{{s.size_gb}} GB</strong><small>{{s.gbph}} GB/hour</small></div></div><div class="col-md"><div class="metric"><span>Tautulli activity</span><strong>{{s.tautulli.plays if s.tautulli else 0}} plays</strong><small>{% if is_admin() %}{{s.tautulli.last_user if s.tautulli else 'Never watched by anyone'}}{% else %}{{'Aggregate activity' if s.tautulli else 'Never watched by anyone'}}{% endif %}</small></div></div><div class="col-md"><div class="metric"><span>Resolution mix</span><strong>{{s.sd}} SD</strong><small>{{s.p720}} × 720p · {{s.p1080}} × 1080p</small></div></div></div><section class="panel table-responsive"><h3>Episodes</h3><table class="table table-sm"><thead><tr><th>Episode</th><th>Title</th><th>Watched</th><th>Size</th><th>Res</th><th>Codec</th></tr></thead><tbody>{% for e in episodes %}<tr><td>S{{'%02d'|format(e.season or 0)}}E{{'%02d'|format(e.episode or 0)}}</td><td>{{e.title}}</td><td>{{'Yes' if e.watched else 'No'}}</td><td>{{e.size_gb}} GB</td><td>{{e.resolution}}</td><td>{{e.codec}}</td></tr>{% endfor %}</tbody></table></section>{% endblock %}
+{% extends 'base.html' %}{% block content %}
+<a href="javascript:history.back()" class="back">← Back</a>
+<section class="title-detail-hero">
+  <div class="title-detail-poster"><img src="{{ url_for('smart_search_poster', item_id=s.show_id) }}" alt="{{s.title}} poster"><span class="poster-fallback">No poster</span></div>
+  <div class="title-detail-copy">
+    <div class="detail-eyebrow">TV Show{% if s.library %} · {{s.library}}{% endif %}</div>
+    <h1>{{s.title}} {% if s.year %}<span>{{s.year}}</span>{% endif %}</h1>
+    <div class="detail-meta"><span>{{seasons}} season{{'' if seasons==1 else 's'}}</span><span>{{s.episodes}} episodes</span><span>{{s.size_gb}} GB</span></div>
+    <p class="detail-summary">Your Plex library has {{s.episodes}} episodes across {{seasons}} season{{'' if seasons==1 else 's'}}, with {{watched}} watched.</p>
+    <div class="detail-actions">
+      {% if s.plex_url %}<a class="btn btn-warning" href="{{s.plex_url}}" target="_blank" rel="noopener">▶ Open in Plex</a>{% endif %}
+      {% if s.arr_url and is_admin() %}<a class="btn btn-outline-info" href="{{s.arr_url}}" target="_blank">Open in Sonarr ↗</a>
+      {% elif s.arr_url %}<span class="badge text-bg-success">Sonarr matched</span>
+      {% elif s.arr_status=='alternate' %}<span class="badge text-bg-warning">Alternate / duplicate?</span>
+      {% else %}<span class="badge text-bg-secondary">Not in Sonarr</span>{% endif %}
+    </div>
+  </div>
+</section>
+<div class="detail-stat-grid">
+  <div class="metric"><span>Tautulli activity</span><strong>{{s.tautulli.plays if s.tautulli else 0}} plays</strong><small>{% if is_admin() %}{{s.tautulli.last_user if s.tautulli else 'Never watched by anyone'}}{% else %}{{'Aggregate activity' if s.tautulli else 'Never watched by anyone'}}{% endif %}</small></div>
+  <div class="metric"><span>Episodes</span><strong>{{watched}} / {{s.episodes}}</strong><small>watched in Plex</small></div>
+  <div class="metric"><span>Storage</span><strong>{{s.size_gb}} GB</strong><small>{{s.gbph}} GB/hour</small></div>
+  <div class="metric"><span>Quality mix</span><strong>{{s.p1080}} × 1080p</strong><small>{{s.p720}} × 720p · {{s.sd}} SD</small></div>
+</div>
+<section class="panel detail-files"><div class="section-title"><div><h3>Episodes</h3><p>Everything currently in this Plex show</p></div></div>
+<div class="table-responsive"><table class="table table-hover align-middle episode-table"><thead><tr><th>Episode</th><th>Title</th><th>Status</th><th>Size</th><th>Quality</th><th>Codec</th></tr></thead><tbody>
+{% for e in episodes %}<tr><td><b>S{{'%02d'|format(e.season or 0)}}E{{'%02d'|format(e.episode or 0)}}</b></td><td>{{e.title}}</td><td><span class="badge {{'text-bg-success' if e.watched else 'text-bg-secondary'}}">{{'Watched' if e.watched else 'Unwatched'}}</span></td><td>{{e.size_gb}} GB</td><td>{{e.resolution}}</td><td>{{e.codec}}</td></tr>{% endfor %}
+</tbody></table></div></section>
+{% endblock %}
