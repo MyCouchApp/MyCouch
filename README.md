@@ -25,6 +25,24 @@ v2.9.13 gives Server Stats and the Movie/TV detail pages a more visual, useful i
 - Items genuinely no longer in Plex remain represented in historical statistics instead of exposing obsolete Plex IDs.
 - Dashboard rendering remains local-only; historical recovery no longer requires a live Tautulli request during page load.
 
+### v2.9.12 — Smarter Smart Search
+
+v2.9.12 focuses on making Smart Search behave like a natural-language search of your Plex library rather than a loose keyword search.
+
+- Added strict year and decade constraints, including searches such as `from 1994`, `from the 90s`, and `from the 1980s`.
+- Added genre-aware search intent for common genres and phrases such as `funny`, `sci-fi`, `horror`, and `romantic`.
+- Added watched and unwatched constraints tied to Plex viewing data.
+- Added runtime parsing for searches such as `under 90 minutes`, `less than 2 hours`, `over 2 hours`, and `around 90 minutes`.
+- Added **Smart Search understood** so you can see how MyCouch interpreted a natural-language query.
+- Search results now enforce requested constraints instead of filling the page with increasingly weak matches.
+- Improved result ranking so equally relevant titles are no longer automatically ordered newest-first.
+- Improved match labels so **Strong match**, **Good match**, and **Possible match** reflect the actual query.
+- Added an explicit **Show closest matches** fallback when no exact result exists.
+- Closest matches relax constraints in a predictable order: runtime first, then watched status, then year. Core genre intent remains strict.
+- Recent searches are now stored per signed-in Plex user; signed-out visitors use the shared search history.
+- Added a **Clear history** control for the current user's search history.
+- Updated the sidebar version display to use the application version instead of a hard-coded release number.
+
 ### v2.9.11 — Installable MyCouch app and interface redesign
 
 - Added Progressive Web App (PWA) support.
