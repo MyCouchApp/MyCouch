@@ -1,4 +1,4 @@
-const CACHE = 'mycouch-static-v2.9.14-security';
+const CACHE = 'mycouch-static-v2.9.14.3-stale-ratingkey';
 const ASSETS = [
   '/static/app.css?v=2.9.14-security',
   '/static/mascots/mycouch-logo.png',

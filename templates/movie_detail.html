@@ -1,7 +1,7 @@
 {% extends 'base.html' %}{% block content %}
 <a href="javascript:history.back()" class="back">← Back</a>
 <section class="title-detail-hero">
-  <div class="title-detail-poster"><img src="{{ url_for('smart_search_poster', item_id=m.metadata_id) }}" alt="{{m.title}} poster"><span class="poster-fallback">No poster</span></div>
+  <div class="title-detail-poster"><img src="{{ url_for('smart_search_poster', item_id=m.metadata_id) }}" alt="{{m.title}} poster" onerror="this.style.display='none';this.nextElementSibling.style.display='flex'"><span class="poster-fallback"><span><b>Poster unavailable</b><small>Artwork could not be loaded</small></span></span></div>
   <div class="title-detail-copy">
     <div class="detail-eyebrow">Movie{% if m.library %} · {{m.library}}{% endif %}</div>
     <h1>{{m.title}} {% if m.year %}<span>{{m.year}}</span>{% endif %}</h1>

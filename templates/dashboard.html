@@ -45,8 +45,8 @@
 
 <div id="recent"></div>
 <div class="row g-4 mb-4">
-  <div class="col-xl-6"><section class="panel media-shelf h-100"><div class="shelf-head"><div><h3>Recently Added</h3><p class="muted">Newest additions to your Plex library.</p></div></div><div class="poster-grid">{% for x in recently_added %}<a class="poster-card" href="/{{'movie' if x.kind=='movie' else 'show'}}/{{x.item_id}}"><div class="poster-frame"><img src="/smart-search/poster/{{x.item_id}}" alt="" loading="lazy" onerror="this.style.display='none';this.nextElementSibling.style.display='flex'"><div class="poster-fallback">{{'Movie' if x.kind=='movie' else 'TV'}}</div></div><strong>{{x.title}}</strong><small>{{x.year or ''}}</small></a>{% else %}<p class="muted mb-0">No recent additions found.</p>{% endfor %}</div></section></div>
-  <div class="col-xl-6"><section class="panel media-shelf h-100"><div class="shelf-head"><div><h3>Recently Watched</h3><p class="muted">Latest titles from your Tautulli history.</p></div></div><div class="poster-grid">{% for x in recently_watched %}<a class="poster-card" href="/{{'movie' if x.kind=='movie' else 'show'}}/{{x.item_id}}"><div class="poster-frame"><img src="/smart-search/poster/{{x.item_id}}" alt="" loading="lazy" onerror="this.style.display='none';this.nextElementSibling.style.display='flex'"><div class="poster-fallback">{{'Movie' if x.kind=='movie' else 'TV'}}</div></div><strong>{{x.title}}</strong><small>{{x.watched_at|timestamp_date}}</small></a>{% else %}<p class="muted mb-0">No Tautulli viewing history found.</p>{% endfor %}</div></section></div>
+  <div class="col-xl-6"><section class="panel media-shelf h-100"><div class="shelf-head"><div><h3>Recently Added</h3><p class="muted">Newest additions to your Plex library.</p></div></div><div class="poster-grid">{% for x in recently_added %}<a class="poster-card" href="/{{'movie' if x.kind=='movie' else 'show'}}/{{x.item_id}}"><div class="poster-frame"><img src="/smart-search/poster/{{x.item_id}}" alt="" loading="lazy" onerror="this.style.display='none';this.nextElementSibling.style.display='flex'"><div class="poster-fallback"><span><b>Poster unavailable</b><small>{{'Movie' if x.kind=='movie' else 'TV Show'}}</small></span></div></div><strong>{{x.title}}</strong><small>{{x.year or ''}}</small></a>{% else %}<p class="muted mb-0">No recent additions found.</p>{% endfor %}</div></section></div>
+  <div class="col-xl-6"><section class="panel media-shelf h-100"><div class="shelf-head"><div><h3>Recently Watched</h3><p class="muted">Latest titles from your Tautulli history.</p></div></div><div class="poster-grid">{% for x in recently_watched %}<a class="poster-card" href="/{{'movie' if x.kind=='movie' else 'show'}}/{{x.item_id}}"><div class="poster-frame"><img src="/smart-search/poster/{{x.item_id}}" alt="" loading="lazy" onerror="this.style.display='none';this.nextElementSibling.style.display='flex'"><div class="poster-fallback"><span><b>Poster unavailable</b><small>{{'Movie' if x.kind=='movie' else 'TV Show'}}</small></span></div></div><strong>{{x.title}}</strong><small>{{x.watched_at|timestamp_date}}</small></a>{% else %}<p class="muted mb-0">No Tautulli viewing history found.</p>{% endfor %}</div></section></div>
 </div>
 
 <section class="panel mb-4"><form action="/smart-search" method="get" class="smart-search-submit-form"><label class="form-label fw-semibold">Smart Search</label><div class="input-group input-group-lg"><input class="form-control" name="q" placeholder="Try: man stuck in wilderness and struggles to get home"><button class="btn btn-primary smart-search-submit-button">Search Plex</button></div><div class="smart-search-submit-progress mt-3 d-none"><div class="small mb-1">Searching your Plex library…</div><div class="progress"><div class="progress-bar progress-bar-striped progress-bar-animated" style="width:100%"></div></div></div><div class="small text-muted mt-2">Natural-language discovery across movies already in your Plex library.</div></form></section>
@@ -59,7 +59,7 @@
       {% for x in stats.popular_movies[:10] %}
       <a class="popular-poster-card" href="/movie/{{x.current_item_id or x.item_id}}">
         <span class="popular-rank">#{{loop.index}}</span>
-        <img src="{{ url_for('smart_search_poster', item_id=(x.current_item_id or x.item_id)) }}" alt="{{x.title}} poster" loading="lazy">
+        <div class="popular-poster-frame"><img src="{{ url_for('smart_search_poster', item_id=(x.current_item_id or x.item_id)) }}" alt="{{x.title}} poster" loading="lazy" onerror="this.style.display='none';this.nextElementSibling.style.display='flex'"><span class="poster-fallback"><span><b>Poster unavailable</b><small>Movie</small></span></span></div>
         <span class="popular-card-title">{{x.title}}{% if x.year %} <em>{{x.year}}</em>{% endif %}</span>
         <span class="media-hover-card">
           <strong>{{x.title}}</strong>
@@ -78,7 +78,7 @@
       {% for x in stats.popular_tv[:10] %}
       <a class="popular-poster-card" href="/show/{{x.current_item_id or x.item_id}}">
         <span class="popular-rank">#{{loop.index}}</span>
-        <img src="{{ url_for('smart_search_poster', item_id=(x.current_item_id or x.item_id)) }}" alt="{{x.title}} poster" loading="lazy">
+        <div class="popular-poster-frame"><img src="{{ url_for('smart_search_poster', item_id=(x.current_item_id or x.item_id)) }}" alt="{{x.title}} poster" loading="lazy" onerror="this.style.display='none';this.nextElementSibling.style.display='flex'"><span class="poster-fallback"><span><b>Poster unavailable</b><small>TV Show</small></span></span></div>
         <span class="popular-card-title">{{x.title}}{% if x.year %} <em>{{x.year}}</em>{% endif %}</span>
         <span class="media-hover-card">
           <strong>{{x.title}}</strong>

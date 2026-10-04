@@ -294,3 +294,10 @@ img[src*="/static/mycouch-artwork"] {
 }
 
 .popular-poster-card img{background:linear-gradient(145deg,#181d25,#0f1319)}
+
+/* v2.9.14.1 poster resilience */
+.popular-poster-frame{aspect-ratio:2/3;border-radius:13px 13px 0 0;overflow:hidden;background:#11151a}
+.popular-poster-frame>img{display:block;width:100%;height:100%;object-fit:cover;background:linear-gradient(145deg,#181d25,#0f1319)}
+.poster-fallback>span{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:.3rem;text-align:center;padding:.65rem}
+.poster-fallback b{font-size:.76rem;color:var(--text,#e8edf2)}
+.poster-fallback small{font-size:.68rem;color:var(--muted)}

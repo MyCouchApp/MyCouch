@@ -21,7 +21,7 @@ def _app_secret():
 app=Flask(__name__); app.secret_key=_app_secret()
 app.config.update(SESSION_COOKIE_HTTPONLY=True,SESSION_COOKIE_SAMESITE='Lax',SESSION_COOKIE_SECURE=(os.environ.get('MYCOUCH_SECURE_COOKIE') or os.environ.get('PLA_SECURE_COOKIE','0'))=='1',PERMANENT_SESSION_LIFETIME=timedelta(days=30))
 BUILD_LOCK=threading.Lock()
-APP_VERSION='2.9.14'
+APP_VERSION='2.9.14.3'
 PLEX_UPDATE_STATUS={'running':False,'last_update':None,'error':None}
 SMART_LOCK=threading.Lock(); SMART_MODEL=None; SMART_VECTORS=None; SMART_IDS=None
 BUILD_STATUS={'running':False,'stage':'Idle','percent':0,'current':0,'total':0,'message':'','started_at':None,'elapsed':0,'error':None,'complete':False}
@@ -30,6 +30,7 @@ TAUTULLI_LOCK=threading.Lock()
 BACKUP_LOCK=threading.Lock()
 BACKUP_STATUS={'running':False,'last_backup':None,'error':None}
 DISCORD_BOT_STATUS={'running':False,'connected':False,'user':'','error':'','commands_synced':False,'sync_count':0,'guild_id':''}
+PLEX_ITEM_VALIDITY={}
 TAUTULLI_STATUS={'running':False,'stage':'Idle','percent':0,'current':0,'total':0,'message':'','started_at':None,'elapsed':0,'error':None,'complete':False}
 ARR_STATUS={'running':False,'stage':'Idle','percent':0,'current':0,'total':0,'message':'','started_at':None,'elapsed':0,'error':None,'complete':False,'radarr':{},'sonarr':{}}
 DEFAULT_DB_PATH=os.environ.get('PLEX_DB','')
@@ -580,35 +581,25 @@ def tautulli_dashboard_stats(days=30):
     c.close()
 
     # Dashboard resolution is deliberately local-only: never call Plex/Tautulli over HTTP here.
+    # Use the same resolver as Recently Watched so every historical ratingKey follows
+    # one path to the current Plex item.
     if cache_ready():
         cc=cache_conn()
-        for kind,rows,table,idcol in (('movie',pm,'movies','metadata_id'),('tv',pt,'shows','show_id')):
-            for r in rows:
-                x=cc.execute(f'select title,year,{idcol} current_id from {table} where {idcol}=? limit 1',(r['item_id'],)).fetchone()
-                if x:
-                    r['title'],r['year'],r['current_item_id']=x['title'],x['year'],x['current_id']
-                    continue
-
-                ident=identities.get((kind,r['item_id']))
-                if ident and ident.get('title'):
-                    r['title'],r['year']=ident['title'],ident.get('year')
-                    # A Plex ratingKey can change. Relink by normalized title + year to
-                    # the current cache so artwork/details use the live Plex item.
-                    title=ident['title'].strip()
-                    year=ident.get('year')
-                    if year:
-                        nx=cc.execute(f'select title,year,{idcol} current_id from {table} where lower(trim(title))=lower(trim(?)) and year=? limit 2',(title,year)).fetchall()
+        try:
+            for kind,rows in (('movie',pm),('tv',pt)):
+                for r in rows:
+                    ident=identities.get((kind,r['item_id']))
+                    item=_resolve_tautulli_item(kind,r['item_id'],cc=cc,identities=identities)
+                    if item:
+                        r['title'],r['year'],r['current_item_id']=item['title'],item['year'],item['current_id']
+                        if item['current_id'] != r['item_id']:
+                            r['relinked']=True
+                    elif ident and ident.get('title'):
+                        r['title'],r['year']=ident['title'],ident.get('year'); r['removed']=True
                     else:
-                        nx=cc.execute(f'select title,year,{idcol} current_id from {table} where lower(trim(title))=lower(trim(?)) limit 2',(title,)).fetchall()
-                    if len(nx)==1:
-                        r['current_item_id']=nx[0]['current_id']
-                        r['title'],r['year']=nx[0]['title'],nx[0]['year']
-                        r['relinked']=True
-                    else:
-                        r['removed']=True
-                else:
-                    r['title']='No longer in library'; r['year']=None; r['removed']=True
-        cc.close()
+                        r['title']='No longer in library'; r['year']=None; r['removed']=True
+        finally:
+            cc.close()
     return {'days':days,'plays':total['n'],'hours':round((total['d'] or 0)/3600,1),'users':users,'movies':movies,'episodes':tvplays,'popular_movies':pm,'popular_tv':pt}
 
 def _scheduler_loop():
@@ -1611,6 +1602,19 @@ def smart_search_history_clear():
 @app.get('/smart-search/poster/<int:item_id>')
 def smart_search_poster(item_id):
     poster=_plex_poster(item_id)
+    # A stale detail URL or old dashboard markup may still ask for a historical
+    # ratingKey. If Plex 404s it, use the saved Tautulli identity to resolve the
+    # current Plex item and retry before falling back to Poster unavailable.
+    if not poster and cache_ready():
+        c=config()
+        try:
+            identities=[dict(r) for r in c.execute('select kind,item_id,title,year,current_item_id from tautulli_media_identity where item_id=?',(item_id,)).fetchall()]
+        finally: c.close()
+        for ident in identities:
+            resolved=_resolve_tautulli_item(ident['kind'],item_id,identities={(ident['kind'],item_id):ident})
+            if resolved and int(resolved['current_id']) != int(item_id):
+                poster=_plex_poster(resolved['current_id'])
+                if poster: break
     if not poster: abort(404)
     resp=Response(poster[0],mimetype=poster[1].split(';',1)[0])
     resp.headers['Cache-Control']='private, max-age=86400'
@@ -1644,23 +1648,137 @@ def _dashboard_recently_added(limit=6):
         return [dict(r) for r in rows]
     finally: c.close()
 
-def _dashboard_recently_watched(limit=6):
-    """Latest unique titles from the existing Tautulli history cache."""
+def _normalise_media_title(value):
+    """Normalise punctuation/spacing differences between Tautulli and the Plex cache."""
+    value=(value or '').casefold().replace('&',' and ')
+    return ''.join(ch for ch in value if ch.isalnum())
+
+def _plex_item_exists(item_id, max_age=300):
+    """Check whether a ratingKey still exists on the live Plex server.
+
+    The local MyCouch cache can outlive a Plex ratingKey. Cache the answer briefly so
+    historical dashboard rows do not add repeated Plex requests on every render.
+    Returns True/False when Plex answers, or None when Plex cannot be reached.
+    """
+    try: item_id=int(item_id)
+    except (TypeError,ValueError): return False
+    now=time.time(); cached=PLEX_ITEM_VALIDITY.get(item_id)
+    if cached and now-cached[0] < max_age: return cached[1]
+    base=setting('plex_url','http://localhost:32400').rstrip('/'); token=_plex_token()
+    if not token: return None
+    try:
+        r=requests.get(f'{base}/library/metadata/{item_id}',headers={'X-Plex-Token':token,'Accept':'application/json'},timeout=10)
+        if r.status_code==404:
+            PLEX_ITEM_VALIDITY[item_id]=(now,False); return False
+        if r.ok:
+            PLEX_ITEM_VALIDITY[item_id]=(now,True); return True
+        return None
+    except requests.RequestException:
+        return None
+
+def _save_tautulli_current_id(kind,item_id,current_id):
+    """Remember a successful relink so future dashboard loads do not need to rematch it."""
     c=config()
     try:
+        c.execute('update tautulli_media_identity set current_item_id=?,updated_at=current_timestamp where kind=? and item_id=?',(current_id,kind,item_id))
+        c.commit()
+    finally: c.close()
+
+def _resolve_tautulli_item(kind,item_id,cc=None,identities=None):
+    """Resolve a historical Tautulli ratingKey to the current local Plex cache item.
+
+    Exact IDs are preferred. Historical IDs are then resolved from the saved identity.
+    Matching tolerates punctuation/spacing differences (for example apostrophes, colons,
+    ampersands) but only accepts one unique current Plex item, with year preferred.
+    """
+    own_cc=cc is None
+    if own_cc: cc=cache_conn()
+    try:
+        table,idcol=('movies','metadata_id') if kind=='movie' else ('shows','show_id')
+        item=cc.execute(f'select title,year,{idcol} current_id from {table} where {idcol}=? limit 1',(item_id,)).fetchone()
+        # A row in auditor-cache.db is not proof that the ratingKey still exists in Plex.
+        # This is the key v2.9.14.3 fix: stale cache rows must flow through historical
+        # title/year relinking instead of being accepted as current IDs.
+        if item:
+            live=_plex_item_exists(item_id)
+            if live is True or live is None:
+                return dict(item)
+            print(f'[relink] {kind} cached item {item_id} is stale in Plex; attempting historical relink',flush=True)
+        if identities is None:
+            c=config()
+            try:
+                ident=c.execute('select title,year,current_item_id from tautulli_media_identity where kind=? and item_id=?',(kind,item_id)).fetchone()
+            finally: c.close()
+            ident=dict(ident) if ident else None
+        else:
+            ident=identities.get((kind,item_id))
+        if not ident: return None
+        current_id=ident.get('current_item_id')
+        if current_id:
+            item=cc.execute(f'select title,year,{idcol} current_id from {table} where {idcol}=? limit 1',(current_id,)).fetchone()
+            if item: return dict(item)
+        title=(ident.get('title') or '').strip(); year=ident.get('year')
+        if not title: return None
+        wanted=_normalise_media_title(title)
+        # Pull a small candidate set by year first. Python normalization is intentionally
+        # used here because SQLite lower/trim does not remove punctuation differences.
+        if year:
+            candidates=cc.execute(f'select title,year,{idcol} current_id from {table} where year=?',(year,)).fetchall()
+        else:
+            candidates=cc.execute(f'select title,year,{idcol} current_id from {table}').fetchall()
+        matches=[dict(x) for x in candidates if _normalise_media_title(x['title'])==wanted]
+        # If Tautulli's year is absent/wrong, allow a unique title-only match as a safe fallback.
+        if not matches and year:
+            candidates=cc.execute(f'select title,year,{idcol} current_id from {table}').fetchall()
+            matches=[dict(x) for x in candidates if _normalise_media_title(x['title'])==wanted]
+        # Deduplicate cache rows, then discard candidates Plex confirms are stale.
+        # If Plex is temporarily unreachable, keep unknown candidates rather than breaking
+        # an otherwise usable local dashboard.
+        unique={int(x['current_id']):x for x in matches if x.get('current_id') is not None}
+        live_unique={}
+        for cid,x in unique.items():
+            live=_plex_item_exists(cid)
+            if live is not False: live_unique[cid]=x
+        if live_unique: unique=live_unique
+        if len(unique)==1:
+            found=next(iter(unique.values()))
+            if found['current_id'] != item_id:
+                _save_tautulli_current_id(kind,item_id,found['current_id'])
+                if identities is not None and (kind,item_id) in identities:
+                    identities[(kind,item_id)]['current_item_id']=found['current_id']
+                print(f'[relink] {kind} historical item {item_id} -> current Plex item {found["current_id"]}: {found["title"]} ({found["year"] or "unknown year"})',flush=True)
+            return found
+        if len(unique)>1:
+            print(f'[relink] {kind} historical item {item_id}: ambiguous current match for {title!r} ({year or "unknown year"})',flush=True)
+        else:
+            print(f'[relink] {kind} historical item {item_id}: no current match for {title!r} ({year or "unknown year"})',flush=True)
+        return None
+    finally:
+        if own_cc: cc.close()
+
+def _dashboard_recently_watched(limit=6):
+    """Latest unique Tautulli titles, relinked to current Plex IDs for details/artwork."""
+    c=config()
+    try:
+        # Fetch extra rows because removed historical titles may be skipped.
         rows=c.execute("""
             select kind,item_id,max(watched_at) watched_at,count(*) plays
             from tautulli_history where item_id is not null
             group by kind,item_id order by watched_at desc limit ?
-        """,(limit,)).fetchall()
+        """,(max(limit*4,24),)).fetchall()
+        identities={(r['kind'],r['item_id']):dict(r) for r in c.execute('select kind,item_id,title,year,current_item_id from tautulli_media_identity')}
     finally: c.close()
     if not rows: return []
-    cc=cache_conn(); out=[]
+    cc=cache_conn(); out=[]; seen=set()
     try:
         for r in rows:
-            table,idcol=('movies','metadata_id') if r['kind']=='movie' else ('shows','show_id')
-            item=cc.execute(f'select title,year from {table} where {idcol}=?',(r['item_id'],)).fetchone()
-            if item: out.append({'kind':r['kind'],'item_id':r['item_id'],'title':item['title'],'year':item['year'],'watched_at':r['watched_at'],'plays':r['plays']})
+            item=_resolve_tautulli_item(r['kind'],r['item_id'],cc=cc,identities=identities)
+            if not item: continue
+            current_id=item['current_id']; key=(r['kind'],current_id)
+            if key in seen: continue
+            seen.add(key)
+            out.append({'kind':r['kind'],'item_id':current_id,'historical_item_id':r['item_id'],'title':item['title'],'year':item['year'],'watched_at':r['watched_at'],'plays':r['plays']})
+            if len(out)>=limit: break
         return out
     finally: cc.close()
 
@@ -2122,6 +2240,9 @@ def leaving_soon_settings():
 @app.get('/changelog')
 def changelog():
     versions = [
+        ('v2.9.14.3', 'Fixed stale Plex ratingKeys that still existed in the local MyCouch cache: historical items are now validated against the live Plex server before being treated as current, stale title/year candidates are filtered, and poster requests can retry through the historical identity relinker.'),
+        ('v2.9.14.2', 'Historical Plex relinking fix: normalized title matching now tolerates punctuation differences, persists successful old-to-current ratingKey mappings, and uses one resolver for Popular and Recently Watched poster/detail links.'),
+        ('v2.9.14.1', 'Poster reliability fix: Recently Watched now relinks historical Tautulli ratingKeys to current Plex items, and dashboard poster cards use a consistent fallback when artwork is genuinely unavailable.'),
         ('v2.9.14', 'Security & Private Access: Plex login is now required for library and data pages, and MyCouch verifies that the signed-in Plex account can access the configured Plex server. Added server-side route protection, noindex/robots controls, stronger private response headers, and lightweight 30-day Security Activity logging for noteworthy access events.'),
         ('v2.9.13', 'Server Stats visual refresh: Popular Movies and Popular TV are now compact Top 10 poster grids with ranking badges and hover activity details. Movie and TV detail pages have richer artwork, metadata, activity, storage and quality information. Historical Tautulli titles are retained locally and old Plex rating keys can be relinked to the current title/year match, restoring current artwork and working detail links without slowing Dashboard loads.'),
         ('v2.9.12', 'Smart Search update: year and decade constraints are now honoured, relevance labels use absolute match quality, results rank by relevance instead of favouring newer titles within a decade, and recent searches are separated by signed-in Plex user with shared history for signed-out visitors.'),

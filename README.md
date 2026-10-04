@@ -8,7 +8,25 @@ MyCouch is a self-hosted companion for exploring and understanding a Plex media 
 
 > MyCouch is an independent project and is not affiliated with Plex, Tautulli, Radarr, Sonarr, Discord, Emby or Jellyfin.
 
-## Current release — v2.9.14
+## Current release — v2.9.14.3
+
+### v2.9.14.3 — Stale Plex ratingKey fix
+
+- Validates historical Tautulli ratingKeys against the live Plex server instead of assuming every ID still present in `auditor-cache.db` is current.
+- When Plex returns 404 for a cached historical ID, MyCouch now continues through the title/year relinker and stores the replacement current Plex ratingKey.
+- Filters stale title/year candidates when more than one cached Plex record exists for the same title.
+- Poster requests using an old historical ratingKey can retry through the saved Tautulli identity before showing the fallback poster.
+- Keeps the v2.9.14 security model unchanged.
+
+### v2.9.14.2 — Historical poster relinking fix
+
+- Fixed historical Tautulli items whose old Plex ratingKeys now return 404.
+- Relinking now tolerates punctuation and spacing differences between Tautulli titles and the current Plex cache.
+- Successful old-to-current ratingKey matches are saved for future dashboard loads.
+- Popular Movies/TV and Recently Watched now share the same relinking resolver for poster and detail links.
+- Genuine missing artwork still uses the clean Poster unavailable fallback.
+
+### v2.9.14.1 — Poster reliability fixes
 
 ### Security & Private Access
 
