@@ -1,0 +1,12 @@
+{% extends 'public_base.html' %}{% block content %}
+<div class="row justify-content-center py-5"><div class="col-lg-8 col-xl-6">
+  <div class="card border-0 shadow-sm"><div class="card-body p-4 p-md-5 text-center">
+    <img src="/static/mascots/mycouch-logo.png" alt="MyCouch" style="width:150px;max-width:45%;height:auto" class="mb-4">
+    <div class="text-uppercase small fw-semibold text-secondary mb-2">Your media. Your history. What's next?</div>
+    <h1 class="display-6 fw-bold mb-3">Welcome to MyCouch</h1>
+    <p class="lead text-secondary mb-4">This MyCouch server is private. Sign in with Plex to continue.</p>
+    <a class="btn btn-warning btn-lg px-4" href="/plex/signin">Sign in with Plex</a>
+    <p class="small text-secondary mt-4 mb-0">Access is only granted to Plex accounts that already have access to this Plex server.</p>
+  </div></div>
+</div>
+{% endblock %}

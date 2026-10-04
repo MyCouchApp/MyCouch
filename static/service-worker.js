@@ -1,6 +1,6 @@
-const CACHE = 'mycouch-static-v2.9.13-relink';
+const CACHE = 'mycouch-static-v2.9.14-security';
 const ASSETS = [
-  '/static/app.css?v=2.9.11-pwa',
+  '/static/app.css?v=2.9.14-security',
   '/static/mascots/mycouch-logo.png',
   '/static/pwa-192.png',
   '/static/pwa-512.png'

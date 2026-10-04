@@ -8,9 +8,24 @@ MyCouch is a self-hosted companion for exploring and understanding a Plex media 
 
 > MyCouch is an independent project and is not affiliated with Plex, Tautulli, Radarr, Sonarr, Discord, Emby or Jellyfin.
 
-## Current release — v2.9.13
+## Current release — v2.9.14
 
-### Server Stats Gets a Makeover
+### Security & Private Access
+
+v2.9.14 makes MyCouch private by default when exposed through a public hostname.
+
+- Plex login is required before library, history, search, Server Stats, poster, and activity data can be viewed.
+- A valid Plex account is not enough: MyCouch verifies that the signed-in account can access the configured Plex server.
+- Anonymous visitors see only the private landing/sign-in experience.
+- Library and data/API routes enforce authorization on the server, rather than relying on hidden navigation.
+- Plex access tokens are used only during sign-in verification and are not stored in the browser session.
+- Added private/no-store response handling and security headers for authenticated/admin pages.
+- Added `noindex` response metadata and a restrictive `robots.txt` to discourage indexing by well-behaved crawlers.
+- Added lightweight Security Activity logging for noteworthy events such as denied access, failed authorization, CSRF rejection and suspicious probe paths.
+- Security Activity is automatically pruned after 30 days and does not record tokens, cookies or query strings.
+- Preserved the case-sensitive Dashboard and Movies screenshot asset names (`Dashboard.png` and `Movies.png`).
+
+### v2.9.13 — Server Stats Gets a Makeover
 
 v2.9.13 gives Server Stats and the Movie/TV detail pages a more visual, useful interface while improving how MyCouch handles long-term Tautulli history.
 

@@ -1,0 +1,12 @@
+{% extends 'base.html' %}{% block content %}
+<div class="page-head"><div><h1 class="mb-1">Security Activity</h1><p class="text-muted mb-0">Noteworthy security events only. Entries are automatically retained for 30 days; tokens, cookies and query strings are never logged.</p></div></div>
+<div class="card p-3 mb-4">
+  <div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-3">
+    <div><h5 class="mb-1">Recent events</h5><div class="small text-muted">Newest first</div></div>
+    <div class="d-flex gap-2 align-items-center"><span class="badge text-bg-secondary">Last {{ events|length }} events</span><a class="btn btn-sm btn-outline-secondary" href="/settings">Back to Settings</a></div>
+  </div>
+  <div class="table-responsive"><table class="table table-sm align-middle mb-0"><thead><tr><th>When</th><th>Event</th><th>IP</th><th>Request</th><th>Detail</th></tr></thead><tbody>
+  {% for e in events %}<tr><td class="text-nowrap">{{ e.created_at|timestamp_datetime }}</td><td><code>{{e.event_type}}</code></td><td class="text-nowrap">{{e.ip}}</td><td><code>{{e.method}} {{e.path}}</code></td><td class="small text-muted">{{e.detail}}</td></tr>{% else %}<tr><td colspan="5" class="text-muted py-4 text-center">No security events recorded yet.</td></tr>{% endfor %}
+  </tbody></table></div>
+</div>
+{% endblock %}

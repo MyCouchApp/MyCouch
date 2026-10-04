@@ -19,9 +19,9 @@ def _app_secret():
         return secrets.token_hex(32)
 
 app=Flask(__name__); app.secret_key=_app_secret()
-app.config.update(SESSION_COOKIE_HTTPONLY=True,SESSION_COOKIE_SAMESITE='Lax',SESSION_COOKIE_SECURE=(os.environ.get('MYCOUCH_SECURE_COOKIE') or os.environ.get('PLA_SECURE_COOKIE','0'))=='1')
+app.config.update(SESSION_COOKIE_HTTPONLY=True,SESSION_COOKIE_SAMESITE='Lax',SESSION_COOKIE_SECURE=(os.environ.get('MYCOUCH_SECURE_COOKIE') or os.environ.get('PLA_SECURE_COOKIE','0'))=='1',PERMANENT_SESSION_LIFETIME=timedelta(days=30))
 BUILD_LOCK=threading.Lock()
-APP_VERSION='2.9.13'
+APP_VERSION='2.9.14'
 PLEX_UPDATE_STATUS={'running':False,'last_update':None,'error':None}
 SMART_LOCK=threading.Lock(); SMART_MODEL=None; SMART_VECTORS=None; SMART_IDS=None
 BUILD_STATUS={'running':False,'stage':'Idle','percent':0,'current':0,'total':0,'message':'','started_at':None,'elapsed':0,'error':None,'complete':False}
@@ -62,6 +62,8 @@ def config():
     c.execute('create index if not exists idx_smart_search_history_recent on smart_search_history(owner_key,searched_at desc)')
     c.execute('create table if not exists mobile_auth_pending(state text primary key,pin_id integer not null,created_at integer not null)')
     c.execute('create table if not exists mobile_auth_codes(code text primary key,profile_json text not null,expires_at integer not null)')
+    c.execute('create table if not exists security_events(id integer primary key autoincrement,event_type text not null,ip text,path text,method text,user_agent text,detail text,created_at integer not null)')
+    c.execute('create index if not exists idx_security_events_created on security_events(created_at desc)')
 
     c.execute('create table if not exists discord_posts(id integer primary key autoincrement,category text,item_key text,message text,posted_at integer)')
     c.execute('create index if not exists idx_discord_posts_recent on discord_posts(posted_at)')
@@ -113,6 +115,56 @@ def service_worker():
 def plex_user():
     return session.get('plex_user') or {}
 
+def has_plex_access():
+    machine=setting('plex_machine_id','').strip()
+    return bool(plex_user()) and bool(machine) and session.get('plex_server_access')==machine
+
+def _request_ip():
+    # MyCouch is normally reached through Cloudflare Tunnel. CF-Connecting-IP is
+    # Cloudflare's original-client header; fall back to Flask's peer address.
+    return (request.headers.get('CF-Connecting-IP') or request.remote_addr or '')[:64]
+
+def security_log(event_type, detail='', path=None):
+    try:
+        now=int(time.time()); c=config()
+        c.execute('insert into security_events(event_type,ip,path,method,user_agent,detail,created_at) values(?,?,?,?,?,?,?)',
+                  ((event_type or '')[:48],_request_ip(),(path if path is not None else request.path)[:300],
+                   request.method[:12],(request.headers.get('User-Agent') or '')[:300],(detail or '')[:500],now))
+        # Security Activity is deliberately lightweight: retain 30 days only.
+        c.execute('delete from security_events where created_at<?',(now-30*86400,))
+        c.commit(); c.close()
+    except Exception:
+        pass
+
+def _plex_account_has_server_access(token):
+    """Verify that a Plex login can see this configured Plex Media Server.
+
+    Authentication alone is not authorization: the account must receive the
+    configured machineIdentifier from plex.tv's resource list. Fail closed.
+    """
+    machine=setting('plex_machine_id','').strip()
+    if not machine:
+        return False, 'MyCouch has not detected the Plex server identity yet. An admin must Save & Test Plex in Settings.'
+    headers=dict(_plex_auth_headers()); headers['X-Plex-Token']=token
+    try:
+        r=requests.get('https://plex.tv/api/v2/resources',params={'includeHttps':'1','includeRelay':'1','includeIPv6':'1'},headers=headers,timeout=15)
+        r.raise_for_status()
+        resources=[]
+        try:
+            data=r.json()
+            resources=data if isinstance(data,list) else (data.get('MediaContainer',{}).get('Device',[]) if isinstance(data,dict) else [])
+        except ValueError:
+            root=ET.fromstring(r.content)
+            resources=[node.attrib for node in root.findall('.//Device')]
+        for resource in resources or []:
+            rid=str(resource.get('clientIdentifier') or resource.get('clientidentifier') or resource.get('machineIdentifier') or '')
+            provides=str(resource.get('provides') or '')
+            if secrets.compare_digest(rid,machine) and ('server' in provides.lower() or not provides):
+                return True, ''
+        return False, 'This Plex account does not have access to this Plex server.'
+    except Exception as e:
+        return False, 'MyCouch could not verify access to this Plex server ('+type(e).__name__+').' 
+
 def sort_url(column):
     args=request.args.to_dict(flat=True)
     current=args.get('sort','')
@@ -126,25 +178,62 @@ def sort_mark(column):
     if request.args.get('sort')!=column: return ''
     return ' ▲' if request.args.get('dir','desc').lower()=='asc' else ' ▼'
 
-app.jinja_env.globals.update(plex_user=plex_user, sort_url=sort_url, sort_mark=sort_mark)
+app.jinja_env.globals.update(plex_user=plex_user, has_plex_access=has_plex_access, sort_url=sort_url, sort_mark=sort_mark)
 app.jinja_env.filters['timestamp_date']=lambda v: datetime.fromtimestamp(int(v)).strftime('%d %b %Y') if v else '—'
+app.jinja_env.filters['timestamp_datetime']=lambda v: datetime.fromtimestamp(int(v)).strftime('%d %b %Y %H:%M:%S') if v else '—'
 
-PUBLIC_ENDPOINTS={'dashboard','movie_page','tv_page','movie_detail','show_detail','changelog','login','logout','setup_admin','static','smart_search','smart_search_poster','now_playing_api','cleanup','plex_signin','plex_callback','plex_mobile_callback','plex_mobile_finalize','plex_logout','my_history'}
+# Endpoints that expose library/history data require a verified Plex account.
+PLEX_ENDPOINTS={'dashboard','movie_page','tv_page','movie_detail','show_detail','smart_search','smart_search_history_clear','smart_search_poster','now_playing_api','cleanup','my_history','changelog'}
+# These are reachable before Plex authorization. Dashboard renders only the landing page while signed out.
+ANON_ENDPOINTS={'dashboard','setup_admin','login','logout','static','service_worker','robots_txt','plex_signin','plex_callback','plex_mobile_callback','plex_mobile_finalize','plex_logout'}
+
+@app.after_request
+def security_headers(response):
+    response.headers.setdefault('X-Content-Type-Options','nosniff')
+    response.headers.setdefault('X-Frame-Options','SAMEORIGIN')
+    response.headers.setdefault('Referrer-Policy','same-origin')
+    response.headers.setdefault('Permissions-Policy','camera=(), microphone=(), geolocation=()')
+    response.headers.setdefault('X-Robots-Tag','noindex, nofollow, noarchive, nosnippet')
+    if has_plex_access() or is_admin():
+        response.headers.setdefault('Cache-Control','private, no-store')
+    return response
+
+@app.get('/robots.txt')
+def robots_txt():
+    return Response('User-agent: *\\nDisallow: /\\n',mimetype='text/plain',headers={'Cache-Control':'public, max-age=3600'})
 
 @app.before_request
 def security_gate():
     g.is_admin=is_admin()
+    endpoint=request.endpoint
     # First run: require creation of an admin account before exposing the site.
-    if not admin_configured() and request.endpoint not in {'setup_admin','static'}:
+    if not admin_configured() and endpoint not in {'setup_admin','static','service_worker','robots_txt'}:
         return redirect(url_for('setup_admin'))
-    # Settings, review queue, exports, scans, integrations and operational APIs are admin-only.
-    if request.endpoint and request.endpoint not in PUBLIC_ENDPOINTS and not is_admin():
+
+    # Unknown/probe URLs are useful security signals and should not be redirected to a login form.
+    if endpoint is None:
+        suspicious=any(x in request.path.lower() for x in ('.env','wp-admin','wp-login','phpmyadmin','.git','xmlrpc','cgi-bin','actuator'))
+        security_log('probe' if suspicious else 'not_found','Unknown path')
+        abort(404)
+
+    # Library/data pages require BOTH a Plex identity and verified access to this exact server.
+    if endpoint in PLEX_ENDPOINTS and endpoint!='dashboard' and not has_plex_access():
+        security_log('access_denied','Plex server authorization required')
+        if request.method=='GET': return redirect(url_for('dashboard',next=request.path))
+        abort(403)
+
+    # Everything not explicitly public or Plex-user-facing remains admin-only.
+    if endpoint not in ANON_ENDPOINTS and endpoint not in PLEX_ENDPOINTS and not is_admin():
+        security_log('admin_denied','Admin authorization required')
         if request.method=='GET': return redirect(url_for('login',next=request.path))
         abort(403)
+
     # CSRF protection for every state-changing browser request.
     if request.method in ('POST','PUT','PATCH','DELETE'):
         sent=request.form.get('_csrf') or request.headers.get('X-CSRF-Token')
-        if not sent or not secrets.compare_digest(sent,session.get('_csrf','')): abort(400,'Invalid CSRF token')
+        if not sent or not secrets.compare_digest(sent,session.get('_csrf','')):
+            security_log('csrf_rejected','Missing or invalid CSRF token')
+            abort(400,'Invalid CSRF token')
 
 @app.route('/setup-admin',methods=['GET','POST'])
 def setup_admin():
@@ -161,7 +250,7 @@ def setup_admin():
             set_setting('admin_username',username or 'admin')
             set_setting('admin_password_hash',generate_password_hash(password,method='scrypt'))
             session.clear(); session['admin']=True; csrf_token()
-            flash('Admin account created. Public pages are now read-only and privacy filtered.','success')
+            flash('Admin account created. Plex authorization is required for library access.','success')
             return redirect(url_for('dashboard'))
     return render_template('setup_admin.html')
 
@@ -179,12 +268,14 @@ def login():
                 app.permanent_session_lifetime=timedelta(days=days)
             csrf_token()
             nxt=request.args.get('next','')
-            return redirect(nxt if nxt.startswith('/') and not nxt.startswith('//') else url_for('dashboard'))
+            security_log('admin_login','Successful admin login')
+            return redirect(nxt if nxt.startswith('/') and not nxt.startswith('//') else url_for('settings'))
         flash('Invalid username or password.','danger')
     return render_template('login.html')
 
 @app.post('/logout')
 def logout():
+    security_log('admin_logout','Admin session ended')
     session.clear(); return redirect(url_for('dashboard'))
 
 PLEX_AUTH_PRODUCT='MyCouch'
@@ -247,9 +338,13 @@ def plex_mobile_callback():
         if not token: raise RuntimeError('Plex sign-in was not completed')
         uh=dict(headers); uh['X-Plex-Token']=token
         u=requests.get('https://plex.tv/api/v2/user',headers=uh,timeout=15); u.raise_for_status(); profile=u.json() or {}
+        allowed,reason=_plex_account_has_server_access(token)
+        if not allowed:
+            security_log('plex_denied',reason)
+            raise RuntimeError(reason)
         safe_profile={'id':profile.get('id'),'uuid':profile.get('uuid'),'username':profile.get('username') or '',
                       'title':profile.get('title') or profile.get('friendlyName') or '',
-                      'email':profile.get('email') or '', 'thumb':profile.get('thumb') or ''}
+                      'email':profile.get('email') or '', 'thumb':profile.get('thumb') or '', '_server_access':setting('plex_machine_id','').strip()}
 
         auth_code=secrets.token_urlsafe(32)
         c=config()
@@ -275,8 +370,11 @@ def plex_mobile_finalize():
         return redirect(url_for('dashboard'))
     c.execute('delete from mobile_auth_codes where code=?',(code,))
     c.commit(); c.close()
-    session['plex_user']=json.loads(row['profile_json'])
+    profile=json.loads(row['profile_json'])
+    session['plex_server_access']=profile.pop('_server_access','')
+    session['plex_user']=profile
     session.pop('plex_pin_id',None)
+    security_log('plex_login','Authorized Plex server user')
     flash('Signed in with Plex.','success')
     return redirect(url_for('my_history'))
 
@@ -292,13 +390,19 @@ def plex_callback():
         if not token: raise RuntimeError('Plex sign-in was not completed')
         uh=dict(headers); uh['X-Plex-Token']=token
         u=requests.get('https://plex.tv/api/v2/user',headers=uh,timeout=15); u.raise_for_status(); profile=u.json() or {}
+        allowed,reason=_plex_account_has_server_access(token)
+        if not allowed:
+            security_log('plex_denied',reason)
+            raise RuntimeError(reason)
         # Keep only non-secret identity details in the signed browser session. The Plex token is discarded here.
         session['plex_user']={'id':profile.get('id'),'uuid':profile.get('uuid'),'username':profile.get('username') or '',
                               'title':profile.get('title') or profile.get('friendlyName') or '',
                               'email':profile.get('email') or '', 'thumb':profile.get('thumb') or ''}
+        session['plex_server_access']=setting('plex_machine_id','').strip()
         session.pop('plex_pin_id',None)
+        security_log('plex_login','Authorized Plex server user')
         flash('Signed in with Plex.','success')
-        return redirect(url_for('my_history'))
+        return redirect(url_for('dashboard'))
     except Exception as e:
         session.pop('plex_pin_id',None)
         flash('Plex sign-in failed: '+str(e),'danger')
@@ -306,7 +410,7 @@ def plex_callback():
 
 @app.post('/plex/logout')
 def plex_logout():
-    session.pop('plex_user',None); session.pop('plex_pin_id',None)
+    security_log('plex_logout','Plex session ended'); session.pop('plex_user',None); session.pop('plex_server_access',None); session.pop('plex_pin_id',None)
     flash('Plex account signed out.','success')
     return redirect(url_for('dashboard'))
 
@@ -1568,6 +1672,8 @@ def _dashboard_user_count():
 
 @app.route('/')
 def dashboard():
+    if not has_plex_access():
+        return render_template('landing.html')
     started=time.perf_counter()
     if not cache_ready(): return render_template('no_cache.html',db=get_db_path())
     summary=_dashboard_library_summary()
@@ -2016,6 +2122,7 @@ def leaving_soon_settings():
 @app.get('/changelog')
 def changelog():
     versions = [
+        ('v2.9.14', 'Security & Private Access: Plex login is now required for library and data pages, and MyCouch verifies that the signed-in Plex account can access the configured Plex server. Added server-side route protection, noindex/robots controls, stronger private response headers, and lightweight 30-day Security Activity logging for noteworthy access events.'),
         ('v2.9.13', 'Server Stats visual refresh: Popular Movies and Popular TV are now compact Top 10 poster grids with ranking badges and hover activity details. Movie and TV detail pages have richer artwork, metadata, activity, storage and quality information. Historical Tautulli titles are retained locally and old Plex rating keys can be relinked to the current title/year match, restoring current artwork and working detail links without slowing Dashboard loads.'),
         ('v2.9.12', 'Smart Search update: year and decade constraints are now honoured, relevance labels use absolute match quality, results rank by relevance instead of favouring newer titles within a decade, and recent searches are separated by signed-in Plex user with shared history for signed-out visitors.'),
         ('v2.9.11', 'Redesigned the Dashboard with a visual welcome hero and mascot shortcuts, introduced a responsive left-hand navigation sidebar, moved account/admin controls to the bottom, and removed duplicated page-heading mascot artwork.'),
@@ -2092,8 +2199,16 @@ def security_settings_route():
     try: days=max(1,min(int(request.form.get('remember_days','30')),365))
     except (TypeError,ValueError): days=30
     set_setting('remember_days',str(days))
-    flash('Login security settings saved.','success')
+    flash('Login security settings saved. Security Activity retains noteworthy events for 30 days.','success')
     return redirect(url_for('settings'))
+
+@app.get('/security-activity')
+def security_activity():
+    c=config()
+    events=[dict(r) for r in c.execute('select * from security_events order by created_at desc limit 250').fetchall()]
+    c.close()
+    return render_template('security_activity.html',events=events)
+
 
 @app.route('/settings', methods=['GET','POST'])
 def settings():
