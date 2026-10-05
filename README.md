@@ -1,12 +1,8 @@
 # 🛋️ MyCouch
 
-**Current release: v2.9.15.2**
+**Current release: v2.9.16**
 
-v2.9.15 adds people-aware Smart Search with Plex cast/director metadata, natural runtimes,
-shared Discord `/search` behaviour, and UI polish. v2.9.15.1 tightens people ranking so full
-actor/director name matches rank ahead of incidental text matches and only genuine people
-matches receive the People match badge.
-
+v2.9.16 introduces Universal Media Preview: larger, richer movie and TV cards that appear anywhere MyCouch has a recognised local title link. Preview data is loaded on demand from the local cache and reused in the browser, keeping the experience fast.
 
 <img src="static/mycouch-github.png" alt="MyCouch couch mascot" width="180">
 
@@ -16,8 +12,30 @@ MyCouch is a self-hosted companion for exploring and understanding a Plex media 
 
 > MyCouch is an independent project and is not affiliated with Plex, Tautulli, Radarr, Sonarr, Discord, Emby or Jellyfin.
 
-## Current release — v2.9.15
+## Current release — v2.9.16
 
+
+### v2.9.16 — Universal Media Preview
+
+- Replaces the small popularity tooltip with a much larger rich movie/TV preview card.
+- Works automatically on recognised movie/show links across Dashboard, Now Playing, Recently Added, Recently Watched, Movies, TV, Smart Search, My History, Review Queue and Leaving Soon.
+- Movie previews can show poster, year, content rating, Plex rating, runtime, genres, director, cast, synopsis and aggregate Tautulli activity.
+- TV previews can additionally show seasons, episode count and watched progress.
+- Preview metadata is fetched only when needed and cached in the browser for instant repeat hovers.
+- Desktop uses a short hover delay; touch devices use tap-to-preview with a second tap continuing to the title.
+- Preview positioning automatically stays within the browser window and supports dark/light mode.
+
+**Upgrade note:** run **Update Plex Now** once after upgrading to populate the richer TV preview metadata and rating fields added in v2.9.16. Existing caches still work with a reduced preview until refreshed.
+
+### v2.9.15.2 — Smart Search intent fix
+
+- Multi-person searches such as `Ben Affleck and Matt Damon together` require both people in the same title.
+- Person-plus-role searches such as `Robin Williams in a serious role` combine the person match with dramatic genre intent.
+
+### v2.9.15.1 — People ranking fix
+
+- Full actor/director name matches receive a stronger ranking boost.
+- **People match** is only shown for genuine cached Plex people metadata matches.
 
 ### v2.9.15 — Smart Search, Discord & UI Polish
 
@@ -29,7 +47,7 @@ MyCouch is a self-hosted companion for exploring and understanding a Plex media 
 - Improved responsive Smart Search cards and light-mode styling.
 - Preserves the v2.9.14 private-access/security model and v2.9.14.3 stale ratingKey relinking fixes.
 
-**Upgrade note:** after replacing the application files, run **Refresh Library** once in Settings to populate the new actor/director cache fields. Existing runtime databases and `.pla-secret` remain compatible.
+**Upgrade note:** after replacing the application files, run **Update Plex Now** once in Settings to populate the new actor/director cache fields. Existing runtime databases and `.pla-secret` remain compatible.
 
 ### v2.9.14.3 — Stale Plex ratingKey fix
 

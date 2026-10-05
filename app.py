@@ -21,7 +21,7 @@ def _app_secret():
 app=Flask(__name__); app.secret_key=_app_secret()
 app.config.update(SESSION_COOKIE_HTTPONLY=True,SESSION_COOKIE_SAMESITE='Lax',SESSION_COOKIE_SECURE=(os.environ.get('MYCOUCH_SECURE_COOKIE') or os.environ.get('PLA_SECURE_COOKIE','0'))=='1',PERMANENT_SESSION_LIFETIME=timedelta(days=30))
 BUILD_LOCK=threading.Lock()
-APP_VERSION='2.9.15.2'
+APP_VERSION='2.9.16.3'
 PLEX_UPDATE_STATUS={'running':False,'last_update':None,'error':None}
 SMART_LOCK=threading.Lock(); SMART_MODEL=None; SMART_VECTORS=None; SMART_IDS=None
 BUILD_STATUS={'running':False,'stage':'Idle','percent':0,'current':0,'total':0,'message':'','started_at':None,'elapsed':0,'error':None,'complete':False}
@@ -184,7 +184,7 @@ app.jinja_env.filters['timestamp_date']=lambda v: datetime.fromtimestamp(int(v))
 app.jinja_env.filters['timestamp_datetime']=lambda v: datetime.fromtimestamp(int(v)).strftime('%d %b %Y %H:%M:%S') if v else '—'
 
 # Endpoints that expose library/history data require a verified Plex account.
-PLEX_ENDPOINTS={'dashboard','movie_page','tv_page','movie_detail','show_detail','smart_search','smart_search_history_clear','smart_search_poster','now_playing_api','cleanup','my_history','changelog'}
+PLEX_ENDPOINTS={'dashboard','movie_page','tv_page','movie_detail','show_detail','smart_search','smart_search_history_clear','smart_search_poster','now_playing_api','media_preview_api','cleanup','my_history','changelog'}
 # These are reachable before Plex authorization. Dashboard renders only the landing page while signed out.
 ANON_ENDPOINTS={'dashboard','setup_admin','login','logout','static','service_worker','robots_txt','plex_signin','plex_callback','plex_mobile_callback','plex_mobile_finalize','plex_logout'}
 
@@ -1278,30 +1278,41 @@ def refresh_cache():
         dst=sqlite3.connect(build)
         dst.executescript("""
           create table cache_meta(key text primary key,value text);
-          create table movies(library text,metadata_id integer,title text,year integer,added_at integer,media_id integer,width integer,height integer,codec text,audio_codec text,bitrate integer,duration integer,size_bytes integer,path text,watched integer,size_gb real,resolution text,age real,summary text,genres text,actors text,directors text);
-          create table shows(library text,show_id integer primary key,title text,year integer,added_at integer,episodes integer,sd integer,p720 integer,p1080 integer,h264 integer,hevc integer,av1 integer,size_bytes integer,duration_ms integer,watched_episodes integer,size_gb real,hours real,gbph real,pct real,age real);
+          create table movies(library text,metadata_id integer,title text,year integer,added_at integer,media_id integer,width integer,height integer,codec text,audio_codec text,bitrate integer,duration integer,size_bytes integer,path text,watched integer,size_gb real,resolution text,age real,summary text,genres text,actors text,directors text,content_rating text,rating real);
+          create table shows(library text,show_id integer primary key,title text,year integer,added_at integer,episodes integer,sd integer,p720 integer,p1080 integer,h264 integer,hevc integer,av1 integer,size_bytes integer,duration_ms integer,watched_episodes integer,size_gb real,hours real,gbph real,pct real,age real,summary text,genres text,actors text,directors text,content_rating text,rating real);
           create table episodes(show_id integer,season integer,episode integer,title text,height integer,codec text,audio_codec text,duration integer,size_bytes integer,path text,watched integer,size_gb real,resolution text);
         """)
         set_build_status(stage='Reading movies',percent=10,message='Reading movie metadata…')
         mrows=src.execute(MOVIE_SQL).fetchall(); total=len(mrows)
         for i,r in enumerate(mrows,1):
             d=dict(r); size=round((d['size_bytes'] or 0)/1073741824,2)
-            summary=''; genres=''; actors=''; directors=''
+            summary=''; genres=''; actors=''; directors=''; content_rating=''; rating=None
             try:
-                mr=src.execute('select summary from metadata_items where id=?',(d['metadata_id'],)).fetchone(); summary=(mr['summary'] or '') if mr else ''
+                mr=src.execute('select summary,content_rating,rating from metadata_items where id=?',(d['metadata_id'],)).fetchone()
+                if mr:
+                    summary=mr['summary'] or ''; content_rating=mr['content_rating'] or ''; rating=mr['rating']
                 # Plex tag types: 1 genre, 4 director, 6 actor. Keep these in the local
                 # cache so Smart Search never needs a live Plex API request per result.
                 tag_rows=src.execute("select t.tag_type,group_concat(distinct t.tag) g from taggings tg join tags t on t.id=tg.tag_id where tg.metadata_item_id=? and t.tag_type in (1,4,6) and trim(coalesce(t.tag,''))<>'' group by t.tag_type",(d['metadata_id'],)).fetchall()
                 tags={int(x['tag_type']):x['g'] or '' for x in tag_rows}
                 genres=tags.get(1,''); directors=tags.get(4,''); actors=tags.get(6,'')
             except Exception: pass
-            dst.execute('insert into movies values(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)',(d['library'],d['metadata_id'],d['title'],d['year'],d['added_at'],d['media_id'],d['width'],d['height'],d['codec'],d['audio_codec'],d['bitrate'],d['duration'],d['size_bytes'],d['path'],d['watched'],size,resolution(d['height']),age_years(d['added_at']),summary,genres,actors,directors))
+            dst.execute('insert into movies values(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)',(d['library'],d['metadata_id'],d['title'],d['year'],d['added_at'],d['media_id'],d['width'],d['height'],d['codec'],d['audio_codec'],d['bitrate'],d['duration'],d['size_bytes'],d['path'],d['watched'],size,resolution(d['height']),age_years(d['added_at']),summary,genres,actors,directors,content_rating,rating))
             if i==1 or i%100==0 or i==total: set_build_status(stage='Processing movies',percent=10+int(20*i/max(total,1)),current=i,total=total,message=f'{i:,} / {total:,} movie files')
         set_build_status(stage='Reading TV shows',percent=31,current=0,total=0,message='Calculating TV show statistics…')
         trows=src.execute(TV_SQL).fetchall(); total=len(trows)
         for i,r in enumerate(trows,1):
             d=dict(r); size=round((d['size_bytes'] or 0)/1073741824,2); hours=round((d['duration_ms'] or 0)/3600000,1); gbph=round(size/hours,2) if hours else 0; pct=round((d['watched_episodes'] or 0)*100/(d['episodes'] or 1),1)
-            dst.execute('insert into shows values(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)',(d['library'],d['show_id'],d['title'],d['year'],d['added_at'],d['episodes'],d['sd'],d['p720'],d['p1080'],d['h264'],d['hevc'],d['av1'],d['size_bytes'],d['duration_ms'],d['watched_episodes'],size,hours,gbph,pct,age_years(d['added_at'])))
+            summary=''; genres=''; actors=''; directors=''; content_rating=''; rating=None
+            try:
+                mr=src.execute('select summary,content_rating,rating from metadata_items where id=?',(d['show_id'],)).fetchone()
+                if mr:
+                    summary=mr['summary'] or ''; content_rating=mr['content_rating'] or ''; rating=mr['rating']
+                tag_rows=src.execute("select t.tag_type,group_concat(distinct t.tag) g from taggings tg join tags t on t.id=tg.tag_id where tg.metadata_item_id=? and t.tag_type in (1,4,6) and trim(coalesce(t.tag,''))<>'' group by t.tag_type",(d['show_id'],)).fetchall()
+                tags={int(x['tag_type']):x['g'] or '' for x in tag_rows}
+                genres=tags.get(1,''); directors=tags.get(4,''); actors=tags.get(6,'')
+            except Exception: pass
+            dst.execute('insert into shows values(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)',(d['library'],d['show_id'],d['title'],d['year'],d['added_at'],d['episodes'],d['sd'],d['p720'],d['p1080'],d['h264'],d['hevc'],d['av1'],d['size_bytes'],d['duration_ms'],d['watched_episodes'],size,hours,gbph,pct,age_years(d['added_at']),summary,genres,actors,directors,content_rating,rating))
             if i==1 or i%50==0 or i==total: set_build_status(stage='Processing TV shows',percent=31+int(14*i/max(total,1)),current=i,total=total,message=f'{i:,} / {total:,} TV shows')
         set_build_status(stage='Reading episodes',percent=46,current=0,total=0,message='Reading TV episode metadata…')
         eps=src.execute("""select sh.id show_id,se.[index] season,ep.[index] episode,ep.title,med.height,med.video_codec codec,med.audio_codec,med.duration,mp.size size_bytes,mp.file path,case when exists(select 1 from metadata_item_settings x where x.guid=ep.guid and coalesce(x.view_count,0)>0) then 1 else 0 end watched from metadata_items ep join metadata_items se on ep.parent_id=se.id join metadata_items sh on se.parent_id=sh.id join library_sections ls on ls.id=ep.library_section_id join media_items med on med.metadata_item_id=ep.id and med.deleted_at is null join media_parts mp on mp.media_item_id=med.id and mp.deleted_at is null where ep.metadata_type=4 and ep.deleted_at is null and ls.name<>'Sports'""").fetchall(); total=len(eps)
@@ -2054,6 +2065,40 @@ def show_detail(item_id):
     watched=sum(1 for e in eps if e.get('watched'))
     return render_template('show_detail.html',s=s,episodes=eps,seasons=seasons,watched=watched)
 
+def _cache_columns(table):
+    c=cache_conn()
+    try: return {r['name'] for r in c.execute(f'pragma table_info({table})').fetchall()}
+    finally: c.close()
+
+@app.get('/api/media-preview/<kind>/<int:item_id>')
+def media_preview_api(kind,item_id):
+    """One fast local preview endpoint used by every movie/show link in MyCouch."""
+    if kind not in ('movie','show') or not cache_ready(): abort(404)
+    table,idcol,activity_kind=('movies','metadata_id','movie') if kind=='movie' else ('shows','show_id','tv')
+    rows=qcache(f'select * from {table} where {idcol}=? limit 1',(item_id,))
+    if not rows: abort(404)
+    r=rows[0]; cols=_cache_columns(table)
+    activity=tautulli_activity(activity_kind).get(item_id) or {}
+    data={
+        'kind':kind,'item_id':item_id,'title':r.get('title') or 'Unknown title','year':r.get('year'),
+        'poster_url':url_for('smart_search_poster',item_id=item_id),'details_url':f"/{kind}/{item_id}" if kind=='movie' else f"/show/{item_id}",
+        'plex_url':_plex_web_link(item_id),'summary':r.get('summary','') if 'summary' in cols else '',
+        'genres':_clean_genres(r.get('genres','')) if 'genres' in cols else [],
+        'actors':_split_people(r.get('actors',''))[:6] if 'actors' in cols else [],
+        'directors':_split_people(r.get('directors',''))[:4] if 'directors' in cols else [],
+        'content_rating':r.get('content_rating','') if 'content_rating' in cols else '',
+        'rating':r.get('rating') if 'rating' in cols else None,
+        'plays':int(activity.get('plays') or 0),'last_watched':activity.get('last_watched') or None,
+    }
+    if kind=='movie':
+        mins=round((r.get('duration') or 0)/60000) if (r.get('duration') or 0)>10000 else round((r.get('duration') or 0)/60)
+        data.update(runtime=_runtime_display(mins),watched=bool(r.get('watched')))
+    else:
+        eps=int(r.get('episodes') or 0); watched=int(r.get('watched_episodes') or 0)
+        seasons=qcache('select count(distinct season) n from episodes where show_id=? and season is not null',(item_id,))
+        data.update(episodes=eps,watched_episodes=watched,seasons=int(seasons[0]['n'] if seasons else 0),progress=round(watched*100/eps) if eps else 0)
+    return data
+
 @app.post('/protect')
 def protect():
     kind=request.form['kind']; title=request.form['title']; action=request.form.get('action','protect'); c=config()
@@ -2334,6 +2379,7 @@ def leaving_soon_settings():
 @app.get('/changelog')
 def changelog():
     versions = [
+        ('v2.9.16', 'Universal Media Preview: larger rich movie and TV preview cards now work across MyCouch wherever a local movie/show detail link appears, including Dashboard shelves, Now Playing, Movies, TV, Smart Search, History, Review Queue and Leaving Soon. Previews are fetched from the local cache on demand and reused in-browser.'),
         ('v2.9.15.2', 'Smart Search intent fix: multi-person searches such as “Ben Affleck and Matt Damon together” now require both people in the same title, while person-plus-role searches such as “Robin Williams in a serious role” combine the actor match with dramatic genre intent instead of matching unrelated words.'),
         ('v2.9.15.1', 'Smart Search people-ranking fix: full actor/director name matches now receive a strong ranking boost, and the People match badge is only shown when the searched person actually matches cached Plex people metadata. Also restores the missing v2.9.15 entry on the visible Changelog page.'),
         ('v2.9.15', 'Smart Search, Discord & UI Polish: added people-aware searching using cached Plex cast and director metadata, cast/director details on movie results and detail pages, natural runtime display, shared Smart Search behaviour for Discord /search, responsive result improvements and light-mode polish. Run Update Plex Now once after upgrading to populate people metadata.'),

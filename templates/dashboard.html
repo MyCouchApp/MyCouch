@@ -57,17 +57,10 @@
     <div class="popular-section-head"><div><h5>Popular movies</h5><small>Most watched in this period</small></div><a href="/movies?filter=popular_{{stats.days if stats.days else 'all'}}">View all →</a></div>
     <div class="popular-poster-grid">
       {% for x in stats.popular_movies[:10] %}
-      <a class="popular-poster-card" href="/movie/{{x.current_item_id or x.item_id}}">
+      <a class="popular-poster-card" href="/movie/{{x.current_item_id or x.item_id}}" data-media-preview>
         <span class="popular-rank">#{{loop.index}}</span>
         <div class="popular-poster-frame"><img src="{{ url_for('smart_search_poster', item_id=(x.current_item_id or x.item_id)) }}" alt="{{x.title}} poster" loading="lazy" onerror="this.style.display='none';this.nextElementSibling.style.display='flex'"><span class="poster-fallback"><span><b>Poster unavailable</b><small>Movie</small></span></span></div>
         <span class="popular-card-title">{{x.title}}{% if x.year %} <em>{{x.year}}</em>{% endif %}</span>
-        <span class="media-hover-card">
-          <strong>{{x.title}}</strong>
-          {% if x.year %}<span>{{x.year}} · Movie</span>{% endif %}
-          <span><b>{{x.viewers}}</b> viewers · <b>{{x.plays}}</b> plays</span>
-          <span><b>{{'%.1f'|format(x.duration/3600)}}</b> viewing hours</span>
-          <small>Open details →</small>
-        </span>
       </a>
       {% else %}<div class="muted">No movie activity in this period.</div>{% endfor %}
     </div>
@@ -76,17 +69,10 @@
     <div class="popular-section-head"><div><h5>Popular TV</h5><small>Most watched in this period</small></div><a href="/tv?filter=popular_{{stats.days if stats.days else 'all'}}">View all →</a></div>
     <div class="popular-poster-grid">
       {% for x in stats.popular_tv[:10] %}
-      <a class="popular-poster-card" href="/show/{{x.current_item_id or x.item_id}}">
+      <a class="popular-poster-card" href="/show/{{x.current_item_id or x.item_id}}" data-media-preview>
         <span class="popular-rank">#{{loop.index}}</span>
         <div class="popular-poster-frame"><img src="{{ url_for('smart_search_poster', item_id=(x.current_item_id or x.item_id)) }}" alt="{{x.title}} poster" loading="lazy" onerror="this.style.display='none';this.nextElementSibling.style.display='flex'"><span class="poster-fallback"><span><b>Poster unavailable</b><small>TV Show</small></span></span></div>
         <span class="popular-card-title">{{x.title}}{% if x.year %} <em>{{x.year}}</em>{% endif %}</span>
-        <span class="media-hover-card">
-          <strong>{{x.title}}</strong>
-          {% if x.year %}<span>{{x.year}} · TV Show</span>{% endif %}
-          <span><b>{{x.viewers}}</b> viewers · <b>{{x.plays}}</b> plays</span>
-          <span><b>{{'%.1f'|format(x.duration/3600)}}</b> viewing hours</span>
-          <small>Open details →</small>
-        </span>
       </a>
       {% else %}<div class="muted">No TV activity in this period.</div>{% endfor %}
     </div>
@@ -97,7 +83,7 @@
 <script>
 function escNow(s){return String(s||'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]))}
 function nowBadge(decision){const d=String(decision||''),l=d.toLowerCase(),cls=l.includes('transcode')?'text-bg-warning':l.includes('direct')?'text-bg-success':'text-bg-secondary';return d?`<span class="badge ${cls}">${escNow(d)}</span>`:'';}
-function nowCard(x){const poster=x.poster_id?`<a href="${x.plex_url?escNow(x.plex_url):'#'}" ${x.plex_url?'target="_blank" rel="noopener"':''} class="now-poster-link"><img src="/smart-search/poster/${Number(x.poster_id)}" class="now-poster" alt="" onerror="this.parentElement.style.display='none'"></a>`:''; const title=x.plex_url?`<a class="now-title" href="${escNow(x.plex_url)}" target="_blank" rel="noopener">${escNow(x.title)}</a>`:`<span class="now-title">${escNow(x.title)}</span>`; const pct=Math.max(0,Math.min(100,Number(x.progress)||0)); return `<div class="col-md-6 col-xl-4"><div class="metric now-card"><div class="d-flex gap-3">${poster}<div class="flex-grow-1 min-w-0">${title}${x.episode?`<div class="small text-muted text-truncate mt-1">${escNow(x.episode)}</div>`:''}<div class="d-flex align-items-center gap-2 mt-2"><strong style="font-size:1.05rem">${pct}%</strong>${nowBadge(x.decision)}</div><div class="progress now-progress mt-2"><div class="progress-bar" style="width:${pct}%"></div></div><small class="d-block mt-2">${escNow(x.player)}${x.quality?' · '+escNow(x.quality):''}</small></div></div></div></div>`;}
+function nowCard(x){const previewKind=x.media_type==='episode'?'show':'movie',previewId=x.media_type==='episode'?x.poster_id:x.item_id,previewAttr=previewId?` data-media-preview data-media-kind="${previewKind}" data-media-id="${Number(previewId)}"`:''; const poster=x.poster_id?`<a href="${x.plex_url?escNow(x.plex_url):'#'}" ${x.plex_url?'target="_blank" rel="noopener"':''} class="now-poster-link"${previewAttr}><img src="/smart-search/poster/${Number(x.poster_id)}" class="now-poster" alt="" onerror="this.parentElement.style.display='none'"></a>`:''; const title=x.plex_url?`<a class="now-title" href="${escNow(x.plex_url)}" target="_blank" rel="noopener"${previewAttr}>${escNow(x.title)}</a>`:`<span class="now-title">${escNow(x.title)}</span>`; const pct=Math.max(0,Math.min(100,Number(x.progress)||0)); return `<div class="col-md-6 col-xl-4"><div class="metric now-card"><div class="d-flex gap-3">${poster}<div class="flex-grow-1 min-w-0">${title}${x.episode?`<div class="small text-muted text-truncate mt-1">${escNow(x.episode)}</div>`:''}<div class="d-flex align-items-center gap-2 mt-2"><strong style="font-size:1.05rem">${pct}%</strong>${nowBadge(x.decision)}</div><div class="progress now-progress mt-2"><div class="progress-bar" style="width:${pct}%"></div></div><small class="d-block mt-2">${escNow(x.player)}${x.quality?' · '+escNow(x.quality):''}</small></div></div></div></div>`;}
 async function refreshNow(){try{const r=await fetch('/api/now-playing',{cache:'no-store'}),d=await r.json(),box=document.getElementById('nowPlaying'),badge=document.getElementById('nowCount');if(!box)return;badge.className='badge text-bg-success';badge.textContent=d.sessions.length+' active';box.innerHTML=d.sessions.length?d.sessions.map(nowCard).join(''):'<div class="col-12 text-muted">No active streams.</div>';}catch(e){const box=document.getElementById('nowPlaying'),badge=document.getElementById('nowCount');if(box)box.innerHTML='<div class="col-12 text-muted">Now Playing unavailable.</div>';if(badge){badge.textContent='offline';badge.className='badge text-bg-secondary';}}}
 refreshNow(); setInterval(refreshNow,30000);
 const intro=document.getElementById('mycouch-intro');if(intro){try{const saved=localStorage.getItem('mycouch-dashboard-intro-open');if(saved!==null)intro.open=saved==='true';}catch(e){}intro.addEventListener('toggle',function(){try{localStorage.setItem('mycouch-dashboard-intro-open',String(intro.open));}catch(e){}});}

@@ -18,7 +18,7 @@
   <link rel="apple-touch-icon" href="/static/pwa-192.png">
   <link rel="icon" type="image/png" href="/static/pwa-192.png">
   <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
-  <link rel="stylesheet" href="/static/app.css?v=2.9.14-security">
+  <link rel="stylesheet" href="/static/app.css?v=2.9.16.3-dashboard-hover">
 </head>
 <body>
 <div class="mc-shell">
@@ -87,6 +87,8 @@
   </main>
 </div>
 
+<div id="mcMediaPreview" class="mc-media-preview" role="dialog" aria-hidden="true"></div>
+
 <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
 <script>
 (function(){
@@ -136,6 +138,64 @@
   if ('serviceWorker' in navigator) {
     window.addEventListener('load', () => navigator.serviceWorker.register('/sw.js').catch(() => {}));
   }
+
+// v2.9.16 — one universal rich preview for every local movie/show link.
+(function(){
+  const card=document.getElementById('mcMediaPreview'); if(!card)return;
+  const cache=new Map(); let timer=null,active=null,pinned=false,seq=0;
+  const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+  function mediaTarget(node){
+    const el=node?.closest?.('[data-media-preview],a[href^="/movie/"],a[href^="/show/"]'); if(!el)return null;
+    let kind=el.dataset.mediaKind,id=Number(el.dataset.mediaId||0);
+    if(!kind||!id){const m=(el.getAttribute('href')||'').match(/^\/(movie|show)\/(\d+)/);if(!m)return null;kind=m[1];id=Number(m[2]);}
+    return {el,kind,id,key:kind+':'+id};
+  }
+  function dateText(ts){if(!ts)return '';const d=new Date(Number(ts)*1000);return isNaN(d)?'':d.toLocaleDateString(undefined,{day:'numeric',month:'short',year:'numeric'});}
+  function render(d){
+    const meta=[d.year,d.content_rating,d.runtime,d.rating?('★ '+Number(d.rating).toFixed(1)):null].filter(Boolean).map(esc).join(' · ');
+    const progress=d.kind==='show'?`<div class="mc-preview-progress"><span style="width:${Math.max(0,Math.min(100,Number(d.progress)||0))}%"></span></div><div class="mc-preview-small">${d.watched_episodes||0} / ${d.episodes||0} episodes watched${d.seasons?' · '+d.seasons+' seasons':''}</div>`:'';
+    const people=[d.directors?.length?`<div><b>Director${d.directors.length>1?'s':''}</b> ${esc(d.directors.join(' · '))}</div>`:'',d.actors?.length?`<div><b>Cast</b> ${esc(d.actors.join(' · '))}</div>`:''].join('');
+    const activity=d.plays?`<span>Watched ${d.plays} time${d.plays===1?'':'s'}${d.last_watched?' · Last '+esc(dateText(d.last_watched)):''}</span>`:'<span>No recorded Tautulli plays</span>';
+    card.innerHTML=`<div class="mc-preview-layout"><div class="mc-preview-poster"><img src="${esc(d.poster_url)}" alt="" onerror="this.style.display='none'"></div><div class="mc-preview-copy"><div class="mc-preview-type">${d.kind==='movie'?'Movie':'TV Show'}</div><h3>${esc(d.title)}</h3><div class="mc-preview-meta">${meta}</div>${d.genres?.length?`<div class="mc-preview-genres">${d.genres.map(x=>`<span>${esc(x)}</span>`).join('')}</div>`:''}${people?`<div class="mc-preview-people">${people}</div>`:''}${d.summary?`<p>${esc(d.summary)}</p>`:''}${progress}<div class="mc-preview-activity">${activity}</div><div class="mc-preview-actions"><a href="${esc(d.details_url)}">View details</a>${d.plex_url?`<a href="${esc(d.plex_url)}" target="_blank" rel="noopener">Open in Plex</a>`:''}</div></div></div>`;
+  }
+  function position(el){const r=el.getBoundingClientRect(),gap=14,w=Math.min(540,innerWidth-24),h=card.offsetHeight||420;let left=r.left+r.width/2-w/2;left=Math.max(12,Math.min(innerWidth-w-12,left));let top=r.bottom+gap;if(top+h>innerHeight-12)top=Math.max(12,r.top-h-gap);card.style.width=w+'px';card.style.left=left+'px';card.style.top=top+'px';}
+  async function show(t,pin=false){active=t;pinned=pin;const my=++seq;card.classList.add('is-loading','is-visible');card.setAttribute('aria-hidden','false');card.innerHTML='<div class="mc-preview-loading">Loading preview…</div>';position(t.el);try{let d=cache.get(t.key);if(!d){const r=await fetch(`/api/media-preview/${t.kind}/${t.id}`,{headers:{Accept:'application/json'}});if(!r.ok)throw 0;d=await r.json();cache.set(t.key,d);}if(my!==seq)return;card.classList.remove('is-loading');render(d);requestAnimationFrame(()=>position(t.el));}catch(e){if(my===seq)hide();}}
+  function hide(force=false){if(pinned&&!force)return;clearTimeout(timer);active=null;seq++;card.classList.remove('is-visible','is-loading');card.setAttribute('aria-hidden','true');}
+  function scheduleHide(){
+    if(pinned)return;
+    clearTimeout(timer);
+    timer=setTimeout(()=>{
+      const triggerHovered=active?.el && active.el.matches(':hover');
+      const cardHovered=card.matches(':hover');
+      if(!triggerHovered&&!cardHovered)hide();
+    },260);
+  }
+  document.addEventListener('pointerover',e=>{
+    if(e.pointerType==='touch')return;
+    const t=mediaTarget(e.target);
+    if(!t)return;
+    clearTimeout(timer); pinned=false;
+    if(active?.key===t.key && card.classList.contains('is-visible'))return;
+    timer=setTimeout(()=>show(t,false),260);
+  });
+  document.addEventListener('pointerout',e=>{
+    if(pinned)return;
+    const t=mediaTarget(e.target);
+    if(!t)return;
+    const to=e.relatedTarget;
+    if(to && (t.el.contains(to)||card.contains(to)))return;
+    scheduleHide();
+  });
+  card.addEventListener('mouseenter',()=>clearTimeout(timer));
+  card.addEventListener('mouseleave',scheduleHide);
+  document.addEventListener('focusin',e=>{const t=mediaTarget(e.target);if(t){clearTimeout(timer);show(t,false);}});
+  document.addEventListener('keydown',e=>{if(e.key==='Escape'){pinned=false;hide(true);}});
+  document.addEventListener('click',e=>{if(matchMedia('(hover: hover)').matches)return;const t=mediaTarget(e.target);if(!t)return;if(!pinned||active?.key!==t.key){e.preventDefault();show(t,true);} });
+  document.addEventListener('click',e=>{if(pinned&&!card.contains(e.target)&&!mediaTarget(e.target)){pinned=false;hide(true);}},true);
+  addEventListener('scroll',()=>{if(active&&card.classList.contains('is-visible'))position(active.el);},{passive:true});
+  addEventListener('resize',()=>{if(active&&card.classList.contains('is-visible'))position(active.el);});
+})();
+
 })();
 </script>
 </body>
