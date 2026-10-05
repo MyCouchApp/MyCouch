@@ -1,5 +1,13 @@
 # 🛋️ MyCouch
 
+**Current release: v2.9.15.2**
+
+v2.9.15 adds people-aware Smart Search with Plex cast/director metadata, natural runtimes,
+shared Discord `/search` behaviour, and UI polish. v2.9.15.1 tightens people ranking so full
+actor/director name matches rank ahead of incidental text matches and only genuine people
+matches receive the People match badge.
+
+
 <img src="static/mycouch-github.png" alt="MyCouch couch mascot" width="180">
 
 **Your media. Your history. What's next?**
@@ -8,7 +16,20 @@ MyCouch is a self-hosted companion for exploring and understanding a Plex media 
 
 > MyCouch is an independent project and is not affiliated with Plex, Tautulli, Radarr, Sonarr, Discord, Emby or Jellyfin.
 
-## Current release — v2.9.14.3
+## Current release — v2.9.15
+
+
+### v2.9.15 — Smart Search, Discord & UI Polish
+
+- Smart Search now indexes Plex actor and director tags during a Library Refresh.
+- Searches such as `something with Tom Hanks` or `a Spielberg movie` can match people as well as titles, genres and summaries.
+- Movie detail and Smart Search cards show director/cast information when available.
+- Runtime is displayed naturally as `1h 42m` rather than only a minute count.
+- Discord `/search` continues to use the exact same Smart Search engine, so people-aware results work there too after the cache is refreshed.
+- Improved responsive Smart Search cards and light-mode styling.
+- Preserves the v2.9.14 private-access/security model and v2.9.14.3 stale ratingKey relinking fixes.
+
+**Upgrade note:** after replacing the application files, run **Refresh Library** once in Settings to populate the new actor/director cache fields. Existing runtime databases and `.pla-secret` remain compatible.
 
 ### v2.9.14.3 — Stale Plex ratingKey fix
 

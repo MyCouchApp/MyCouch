@@ -21,7 +21,7 @@ def _app_secret():
 app=Flask(__name__); app.secret_key=_app_secret()
 app.config.update(SESSION_COOKIE_HTTPONLY=True,SESSION_COOKIE_SAMESITE='Lax',SESSION_COOKIE_SECURE=(os.environ.get('MYCOUCH_SECURE_COOKIE') or os.environ.get('PLA_SECURE_COOKIE','0'))=='1',PERMANENT_SESSION_LIFETIME=timedelta(days=30))
 BUILD_LOCK=threading.Lock()
-APP_VERSION='2.9.14.3'
+APP_VERSION='2.9.15.2'
 PLEX_UPDATE_STATUS={'running':False,'last_update':None,'error':None}
 SMART_LOCK=threading.Lock(); SMART_MODEL=None; SMART_VECTORS=None; SMART_IDS=None
 BUILD_STATUS={'running':False,'stage':'Idle','percent':0,'current':0,'total':0,'message':'','started_at':None,'elapsed':0,'error':None,'complete':False}
@@ -1278,7 +1278,7 @@ def refresh_cache():
         dst=sqlite3.connect(build)
         dst.executescript("""
           create table cache_meta(key text primary key,value text);
-          create table movies(library text,metadata_id integer,title text,year integer,added_at integer,media_id integer,width integer,height integer,codec text,audio_codec text,bitrate integer,duration integer,size_bytes integer,path text,watched integer,size_gb real,resolution text,age real,summary text,genres text);
+          create table movies(library text,metadata_id integer,title text,year integer,added_at integer,media_id integer,width integer,height integer,codec text,audio_codec text,bitrate integer,duration integer,size_bytes integer,path text,watched integer,size_gb real,resolution text,age real,summary text,genres text,actors text,directors text);
           create table shows(library text,show_id integer primary key,title text,year integer,added_at integer,episodes integer,sd integer,p720 integer,p1080 integer,h264 integer,hevc integer,av1 integer,size_bytes integer,duration_ms integer,watched_episodes integer,size_gb real,hours real,gbph real,pct real,age real);
           create table episodes(show_id integer,season integer,episode integer,title text,height integer,codec text,audio_codec text,duration integer,size_bytes integer,path text,watched integer,size_gb real,resolution text);
         """)
@@ -1286,12 +1286,16 @@ def refresh_cache():
         mrows=src.execute(MOVIE_SQL).fetchall(); total=len(mrows)
         for i,r in enumerate(mrows,1):
             d=dict(r); size=round((d['size_bytes'] or 0)/1073741824,2)
-            summary=''; genres=''
+            summary=''; genres=''; actors=''; directors=''
             try:
                 mr=src.execute('select summary from metadata_items where id=?',(d['metadata_id'],)).fetchone(); summary=(mr['summary'] or '') if mr else ''
-                gr=src.execute("select group_concat(distinct t.tag) g from taggings tg join tags t on t.id=tg.tag_id where tg.metadata_item_id=? and t.tag_type=1 and trim(coalesce(t.tag,''))<>''",(d['metadata_id'],)).fetchone(); genres=(gr['g'] or '') if gr else ''
+                # Plex tag types: 1 genre, 4 director, 6 actor. Keep these in the local
+                # cache so Smart Search never needs a live Plex API request per result.
+                tag_rows=src.execute("select t.tag_type,group_concat(distinct t.tag) g from taggings tg join tags t on t.id=tg.tag_id where tg.metadata_item_id=? and t.tag_type in (1,4,6) and trim(coalesce(t.tag,''))<>'' group by t.tag_type",(d['metadata_id'],)).fetchall()
+                tags={int(x['tag_type']):x['g'] or '' for x in tag_rows}
+                genres=tags.get(1,''); directors=tags.get(4,''); actors=tags.get(6,'')
             except Exception: pass
-            dst.execute('insert into movies values(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)',(d['library'],d['metadata_id'],d['title'],d['year'],d['added_at'],d['media_id'],d['width'],d['height'],d['codec'],d['audio_codec'],d['bitrate'],d['duration'],d['size_bytes'],d['path'],d['watched'],size,resolution(d['height']),age_years(d['added_at']),summary,genres))
+            dst.execute('insert into movies values(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)',(d['library'],d['metadata_id'],d['title'],d['year'],d['added_at'],d['media_id'],d['width'],d['height'],d['codec'],d['audio_codec'],d['bitrate'],d['duration'],d['size_bytes'],d['path'],d['watched'],size,resolution(d['height']),age_years(d['added_at']),summary,genres,actors,directors))
             if i==1 or i%100==0 or i==total: set_build_status(stage='Processing movies',percent=10+int(20*i/max(total,1)),current=i,total=total,message=f'{i:,} / {total:,} movie files')
         set_build_status(stage='Reading TV shows',percent=31,current=0,total=0,message='Calculating TV show statistics…')
         trows=src.execute(TV_SQL).fetchall(); total=len(trows)
@@ -1408,6 +1412,25 @@ def _clean_genres(value):
             found.append(_KNOWN_GENRES[key])
     return found
 
+def _split_people(value):
+    return [x.strip() for x in (value or '').split(',') if x.strip()]
+
+def _runtime_display(minutes):
+    try: minutes=int(round(float(minutes or 0)))
+    except (TypeError,ValueError): return ''
+    if minutes<=0: return ''
+    hours,mins=divmod(minutes,60)
+    if hours and mins: return f'{hours}h {mins}m'
+    if hours: return f'{hours}h'
+    return f'{mins}m'
+
+def _cache_has_people():
+    if not cache_ready(): return False
+    c=cache_conn()
+    try: cols={r['name'] for r in c.execute('pragma table_info(movies)').fetchall()}
+    finally: c.close()
+    return {'actors','directors'} <= cols
+
 def _smart_constraints(q):
     """Extract constraints that should not be treated as ordinary fuzzy keywords."""
     text=(q or '').lower()
@@ -1473,23 +1496,85 @@ def _smart_search_interpretation(q):
         parts.append(f"Around {midpoint} minutes")
     return parts
 
+def _smart_people_queries(q):
+    """Return explicit people constraints and an optional role/tone intent."""
+    raw=re.sub(r'\s+',' ',(q or '').strip())
+
+    # "Robin Williams in a serious role" -> person Robin Williams + serious tone.
+    role=re.fullmatch(r"\s*([A-Za-z][A-Za-z'’-]*(?:\s+[A-Za-z][A-Za-z'’-]*){1,3})\s+in\s+(?:a\s+)?(serious|dramatic|funny|comedic)\s+role\s*",raw,re.I)
+    if role:
+        tone=role.group(2).lower()
+        if tone=='dramatic': tone='serious'
+        if tone=='comedic': tone='funny'
+        return [role.group(1).lower()],tone
+
+    # "Ben Affleck and Matt Damon together" / "Brad Pitt with George Clooney".
+    cleaned=re.sub(r'\b(?:movie|movies|film|films|something|watch|please|show me)\b',' ',raw,flags=re.I)
+    cleaned=re.sub(r'\btogether\b',' ',cleaned,flags=re.I)
+    cleaned=re.sub(r'\s+',' ',cleaned).strip(' ,')
+    m=re.fullmatch(r'(.+?)\s+(?:and|with)\s+(.+?)',cleaned,flags=re.I)
+    if m:
+        names=[]
+        for part in m.groups():
+            words=re.findall(r"[A-Za-z][A-Za-z'’-]*",part)
+            if not (2 <= len(words) <= 4): return [],None
+            names.append(' '.join(words).lower())
+        return names,None
+    return [],None
+
 def _lexical_smart_search(q,limit=20,strict=True):
-    terms=_smart_terms(q); constraints=_smart_constraints(q); c=cache_conn()
-    try: rows=[dict(r) for r in c.execute('select metadata_id,title,year,summary,genres,duration,watched,size_gb from movies group by metadata_id order by size_gb desc')]
-    except sqlite3.OperationalError: rows=[dict(r,summary='',genres='') for r in c.execute('select metadata_id,title,year,duration,watched,size_gb from movies group by metadata_id order by size_gb desc')]
+    terms=_smart_terms(q); constraints=_smart_constraints(q); explicit_people,role_tone=_smart_people_queries(q); c=cache_conn()
+    try:
+        cols={r['name'] for r in c.execute('pragma table_info(movies)').fetchall()}
+        people_cols=',actors,directors' if {'actors','directors'} <= cols else ",' ' actors,'' directors"
+        rows=[dict(r) for r in c.execute('select metadata_id,title,year,summary,genres,duration,watched,size_gb'+people_cols+' from movies group by metadata_id order by size_gb desc')]
+    except sqlite3.OperationalError:
+        rows=[dict(r,summary='',genres='',actors='',directors='') for r in c.execute('select metadata_id,title,year,duration,watched,size_gb from movies group by metadata_id order by size_gb desc')]
     c.close(); scored=[]
     structural={'movie','movies','film','films','from','the','with','about','that','this','want','something','watch','please',
                 'under','over','less','more','than','shorter','longer','least','most','up','to','around','roughly','approximately',
-                'hour','hours','hr','hrs','minute','minutes','min','mins'}
+                'hour','hours','hr','hrs','minute','minutes','min','mins','and','together','role','serious','dramatic','comedic'}
     constraint_words={'funny','comedy','comedies','hilarious','comic','sci','sci-fi','science','fiction','horror','scary','romance','romantic','action','adventure','crime','documentary','drama','fantasy','mystery','thriller','war','western','watched','unwatched','seen','short'}
     lexical_terms=[t for t in terms if t not in structural and t not in constraint_words and not re.fullmatch(r'(?:19|20)?\d0s?',t) and not t.isdigit()]
+    # Treat the remaining words as a possible person name. This prevents a query such
+    # as "tom hanks movie" from awarding People match merely because one token appears
+    # somewhere in cast/director metadata.
+    people_phrase='' if explicit_people else ' '.join(lexical_terms).strip()
     for r in rows:
         year=int(r.get('year') or 0)
         duration_min=round((r.get('duration') or 0)/60000) if r.get('duration') else 0
         clean_genres=_clean_genres(r.get('genres')); genres_lower={g.lower() for g in clean_genres}
         summary=(r.get('summary') or '').strip(); title=(r.get('title') or '').lower()
+        actors=(r.get('actors') or '').lower(); directors=(r.get('directors') or '').lower()
+        people_names=[p.lower() for p in (_split_people(r.get('actors'))+_split_people(r.get('directors')))]
+        exact_people_match=bool(people_phrase and any(people_phrase==p or people_phrase in p for p in people_names))
+        matched_explicit_people=[wanted for wanted in explicit_people if any(wanted==p or wanted in p for p in people_names)]
+        multi_people_match=bool(explicit_people) and len(matched_explicit_people)==len(explicit_people)
 
-        misses=[]; score=0.0; lexical_hits=set(); genre_hits=0
+        misses=[]; score=0.0; lexical_hits=set(); genre_hits=0; people_hits=set()
+        if explicit_people and not multi_people_match:
+            continue
+        if multi_people_match:
+            score+=30.0+5.0*len(explicit_people)
+            people_hits.update(matched_explicit_people)
+        if role_tone=='serious':
+            # Prefer genuinely dramatic Robin-Williams-style roles over titles that
+            # merely contain the person's name. Genre is the reliable cached signal.
+            serious_genres={'drama','thriller','crime','mystery','war','history','biography'}
+            if genres_lower & serious_genres:
+                score+=12.0
+            else:
+                continue
+        elif role_tone=='funny':
+            if 'comedy' in genres_lower:
+                score+=12.0
+            else:
+                continue
+        if exact_people_match:
+            # A full cast/director name is much stronger than title/synopsis token hits.
+            score+=18.0
+            lexical_hits.update(lexical_terms)
+            people_hits.add(people_phrase)
         if constraints['year_min'] is not None and not (constraints['year_min'] <= year <= constraints['year_max']): misses.append('year')
         if constraints['watched'] is not None and bool(r.get('watched')) != constraints['watched']: misses.append('watched')
         if constraints['runtime_min'] is not None and (not duration_min or duration_min < constraints['runtime_min']): misses.append('runtime')
@@ -1515,15 +1600,22 @@ def _lexical_smart_search(q,limit=20,strict=True):
             if 'genre' in unique_misses or len(unique_misses)>1: continue
             score-=3.0*len(unique_misses)
 
-        for t in lexical_terms:
+        score_terms=[] if explicit_people else lexical_terms
+        for t in score_terms:
             if t in title: score+=4; lexical_hits.add(t)
+            elif t in actors or t in directors:
+                # Individual name tokens still contribute to relevance, but only a
+                # full person-name phrase earns the People match badge/large boost.
+                score+=2.0; lexical_hits.add(t)
             elif t in ' '.join(clean_genres).lower(): score+=2.5; lexical_hits.add(t)
             elif t in summary.lower(): score+=1; lexical_hits.add(t)
 
         if score or constraints['year_min'] is not None or constraints['watched'] is not None or constraints['runtime_min'] is not None or constraints['runtime_max'] is not None:
             score += len(lexical_hits)*.25
             r['genre_list']=clean_genres; r['genres_display']=' · '.join(clean_genres); r['plex_url']=_plex_web_link(r['metadata_id'])
-            r['runtime_minutes']=duration_min
+            r['runtime_minutes']=duration_min; r['runtime_display']=_runtime_display(duration_min)
+            r['actor_list']=_split_people(r.get('actors'))[:8]; r['director_list']=_split_people(r.get('directors'))[:4]
+            r['people_match']=bool(people_hits)
             requested_genres=len(constraints['genres'])
             if requested_genres and genre_hits==requested_genres: score+=2.0
             r['constraint_misses']=sorted(set(misses))
@@ -1591,7 +1683,7 @@ def smart_search():
     interpretation=_smart_search_interpretation(q) if q else []
     closest_relaxation=_closest_relaxation(results) if show_closest else None
     return render_template('smart_search.html',q=q,results=results,search_history=_smart_search_history(owner_key=owner_key),
-                           interpretation=interpretation,show_closest=show_closest,closest_relaxation=closest_relaxation)
+                           interpretation=interpretation,show_closest=show_closest,closest_relaxation=closest_relaxation,people_ready=_cache_has_people())
 
 @app.post('/smart-search/history/clear')
 def smart_search_history_clear():
@@ -1947,6 +2039,8 @@ def movie_detail(item_id):
     m['plex_url']=_plex_web_link(item_id)
     m['genre_list']=_clean_genres(m.get('genres'))
     m['runtime_minutes']=round((m.get('duration') or 0)/60000) if (m.get('duration') or 0) > 10000 else round((m.get('duration') or 0)/60)
+    m['runtime_display']=_runtime_display(m['runtime_minutes'])
+    m['actor_list']=_split_people(m.get('actors'))[:12]; m['director_list']=_split_people(m.get('directors'))[:6]
     return render_template('movie_detail.html',m=m,versions=rows,total_gb=round(sum(x['size_gb'] for x in rows),2))
 
 @app.route('/show/<int:item_id>')
@@ -2240,6 +2334,9 @@ def leaving_soon_settings():
 @app.get('/changelog')
 def changelog():
     versions = [
+        ('v2.9.15.2', 'Smart Search intent fix: multi-person searches such as “Ben Affleck and Matt Damon together” now require both people in the same title, while person-plus-role searches such as “Robin Williams in a serious role” combine the actor match with dramatic genre intent instead of matching unrelated words.'),
+        ('v2.9.15.1', 'Smart Search people-ranking fix: full actor/director name matches now receive a strong ranking boost, and the People match badge is only shown when the searched person actually matches cached Plex people metadata. Also restores the missing v2.9.15 entry on the visible Changelog page.'),
+        ('v2.9.15', 'Smart Search, Discord & UI Polish: added people-aware searching using cached Plex cast and director metadata, cast/director details on movie results and detail pages, natural runtime display, shared Smart Search behaviour for Discord /search, responsive result improvements and light-mode polish. Run Update Plex Now once after upgrading to populate people metadata.'),
         ('v2.9.14.3', 'Fixed stale Plex ratingKeys that still existed in the local MyCouch cache: historical items are now validated against the live Plex server before being treated as current, stale title/year candidates are filtered, and poster requests can retry through the historical identity relinker.'),
         ('v2.9.14.2', 'Historical Plex relinking fix: normalized title matching now tolerates punctuation differences, persists successful old-to-current ratingKey mappings, and uses one resolver for Popular and Recently Watched poster/detail links.'),
         ('v2.9.14.1', 'Poster reliability fix: Recently Watched now relinks historical Tautulli ratingKeys to current Plex items, and dashboard poster cards use a consistent fallback when artwork is genuinely unavailable.'),

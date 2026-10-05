@@ -6,12 +6,12 @@
     <div class="detail-eyebrow">Movie{% if m.library %} · {{m.library}}{% endif %}</div>
     <h1>{{m.title}} {% if m.year %}<span>{{m.year}}</span>{% endif %}</h1>
     <div class="detail-meta">
-      {% if m.runtime_minutes %}<span>{{m.runtime_minutes}} min</span>{% endif %}
+      {% if m.runtime_display %}<span>{{m.runtime_display}}</span>{% endif %}
       {% if m.resolution %}<span>{{m.resolution}}</span>{% endif %}
       {% if m.codec %}<span>{{m.codec|upper}}</span>{% endif %}
       <span>{{total_gb}} GB</span>
     </div>
-    {% if m.genre_list %}<div class="detail-genres">{% for g in m.genre_list %}<span>{{g}}</span>{% endfor %}</div>{% endif %}
+    {% if m.genre_list %}<div class="detail-genres">{% for g in m.genre_list %}<span>{{g}}</span>{% endfor %}</div>{% endif %}{% if m.director_list or m.actor_list %}<div class="detail-people">{% if m.director_list %}<div><b>Directed by</b> {{m.director_list|join(', ')}}</div>{% endif %}{% if m.actor_list %}<div><b>Cast</b> {{m.actor_list|join(', ')}}</div>{% endif %}</div>{% endif %}
     {% if m.summary %}<p class="detail-summary">{{m.summary}}</p>{% else %}<p class="detail-summary muted">No synopsis is available from Plex for this title.</p>{% endif %}
     <div class="detail-actions">
       {% if m.plex_url %}<a class="btn btn-warning" href="{{m.plex_url}}" target="_blank" rel="noopener">▶ Open in Plex</a>{% endif %}
