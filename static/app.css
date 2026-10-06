@@ -340,3 +340,133 @@ img[src*="/static/mycouch-artwork"] {
         transform: none !important;
     }
 }
+
+/* v2.9.17 — Settings progress stability */
+.settings-progress-panel{min-height:112px}
+.settings-progress-panel .progress{overflow:hidden}
+.settings-progress-panel .progress-bar{transition:width .22s ease}
+.settings-progress-panel .d-flex.justify-content-between{gap:16px}
+.settings-progress-panel .d-flex.justify-content-between>span:first-child,
+.settings-progress-panel .d-flex.justify-content-between>strong:first-child{min-width:0}
+@media (prefers-reduced-motion:reduce){
+  .settings-progress-panel .progress-bar{transition:none}
+}
+
+/* v2.9.17 — compact page mascot headers */
+.page-header-with-mascot{
+  position:relative;
+  min-height:86px;
+  padding-right:112px;
+}
+.page-header-mascot{
+  position:absolute;
+  top:-8px;
+  right:4px;
+  width:92px;
+  height:92px;
+  object-fit:cover;
+  object-position:center;
+  border-radius:14px;
+  opacity:.96;
+}
+@media (max-width:700px){
+  .page-header-with-mascot{min-height:66px;padding-right:78px}
+  .page-header-mascot{width:64px;height:64px;top:-2px;right:0;border-radius:11px}
+}
+@media (max-width:430px){
+  .page-header-with-mascot{padding-right:0;min-height:0}
+  .page-header-mascot{display:none}
+}
+
+/* v2.9.17 — page mascot: fixed to content top-right without affecting layout */
+main, .main-content, .content { position:relative; }
+.page-corner-mascot{
+  position:absolute;
+  top:18px;
+  right:24px;
+  width:92px;
+  height:92px;
+  object-fit:cover;
+  object-position:center;
+  border-radius:14px;
+  opacity:.96;
+  z-index:2;
+  pointer-events:none;
+}
+@media (max-width:700px){
+  .page-corner-mascot{width:64px;height:64px;top:14px;right:14px;border-radius:11px}
+}
+@media (max-width:430px){
+  .page-corner-mascot{display:none}
+}
+
+/* v2.9.17 — definitive page-corner mascot placement */
+.page-corner-mascot{
+  position:fixed !important;
+  top:20px !important;
+  right:24px !important;
+  left:auto !important;
+  bottom:auto !important;
+  width:92px !important;
+  height:92px !important;
+  margin:0 !important;
+  z-index:20;
+  pointer-events:none;
+}
+@media (max-width:700px){
+  .page-corner-mascot{width:64px !important;height:64px !important;top:14px !important;right:14px !important}
+}
+@media (max-width:430px){.page-corner-mascot{display:none !important}}
+
+/* v2.9.17 final page-corner mascot */
+.mc-main > .container-fluid{position:relative !important}
+.mc-main > .container-fluid > .page-corner-mascot,
+.mc-main .page-corner-mascot{
+  position:absolute !important;
+  top:24px !important;
+  right:24px !important;
+  left:auto !important;
+  bottom:auto !important;
+  width:92px !important;
+  height:92px !important;
+  margin:0 !important;
+  z-index:20 !important;
+  pointer-events:none !important;
+}
+@media(max-width:700px){
+ .mc-main .page-corner-mascot{width:64px !important;height:64px !important;top:18px !important;right:18px !important}
+}
+@media(max-width:430px){.mc-main .page-corner-mascot{display:none !important}}
+
+/* v2.9.17 mascot crop correction */
+.mc-main .page-corner-mascot{
+  width:108px !important;
+  height:92px !important;
+  object-fit:contain !important;
+  object-position:center !important;
+  right:32px !important;
+  border-radius:0 !important;
+}
+@media(max-width:700px){
+  .mc-main .page-corner-mascot{
+    width:76px !important;
+    height:64px !important;
+    right:20px !important;
+    object-fit:contain !important;
+  }
+}
+
+/* v2.9.17 — Movies/TV export action below page mascot */
+.mc-main .page-corner-export{
+  position:absolute;
+  top:124px;
+  right:32px;
+  z-index:20;
+  white-space:nowrap;
+}
+@media(max-width:700px){
+  .mc-main .page-corner-export{top:94px;right:20px}
+}
+@media(max-width:430px){
+  .mc-main .page-corner-export{position:static;margin:0 0 12px 0}
+}

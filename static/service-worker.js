@@ -1,6 +1,6 @@
-const CACHE = 'mycouch-static-v2.9.16.3-dashboard-hover';
+const CACHE = 'mycouch-static-v2.9.17-export-position';
 const ASSETS = [
-  '/static/app.css?v=2.9.16.3-dashboard-hover',
+  '/static/app.css?v=2.9.17-settings-page-mascots',
   '/static/mascots/mycouch-logo.png',
   '/static/pwa-192.png',
   '/static/pwa-512.png'

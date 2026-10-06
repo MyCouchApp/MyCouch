@@ -1,5 +1,7 @@
 {% extends 'base.html' %}{% block content %}
-<div class="page-head"><div class="branded-heading"><span class="couch-icon couch-icon-server" role="img" aria-label="MyCouch mascot"></span><div><h1>Server Stats</h1><p class="muted">Library, storage and cleanup analysis · based on cache refreshed {{cache.refreshed_at or "never"}}</p></div></div></div>
+<div class="page-head"><div class="branded-heading"><span class="couch-icon couch-icon-server" role="img" aria-label="MyCouch mascot"></span><div>
+  <h1>Server Stats</h1>
+<img class="page-corner-mascot" src="/static/mascots/server-card.png" alt="" aria-hidden="true"><p class="muted">Library, storage and cleanup analysis · based on cache refreshed {{cache.refreshed_at or "never"}}</p></div></div></div>
 <div class="row g-3 mb-4 dashboard-summary">
   <div class="col-6 col-xl-3"><a class="metric dashboard-metric" href="/movies"><span>Movies</span><strong>{{summary.movie_count}}</strong><small>{{summary.movie_tb}} TB</small></a></div>
   <div class="col-6 col-xl-3"><a class="metric dashboard-metric" href="/tv"><span>TV Shows</span><strong>{{summary.tv_count}}</strong><small>{{summary.tv_tb}} TB</small></a></div>

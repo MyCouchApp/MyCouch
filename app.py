@@ -21,7 +21,7 @@ def _app_secret():
 app=Flask(__name__); app.secret_key=_app_secret()
 app.config.update(SESSION_COOKIE_HTTPONLY=True,SESSION_COOKIE_SAMESITE='Lax',SESSION_COOKIE_SECURE=(os.environ.get('MYCOUCH_SECURE_COOKIE') or os.environ.get('PLA_SECURE_COOKIE','0'))=='1',PERMANENT_SESSION_LIFETIME=timedelta(days=30))
 BUILD_LOCK=threading.Lock()
-APP_VERSION='2.9.16.3'
+APP_VERSION='2.9.17'
 PLEX_UPDATE_STATUS={'running':False,'last_update':None,'error':None}
 SMART_LOCK=threading.Lock(); SMART_MODEL=None; SMART_VECTORS=None; SMART_IDS=None
 BUILD_STATUS={'running':False,'stage':'Idle','percent':0,'current':0,'total':0,'message':'','started_at':None,'elapsed':0,'error':None,'complete':False}
@@ -2379,6 +2379,7 @@ def leaving_soon_settings():
 @app.get('/changelog')
 def changelog():
     versions = [
+        ('v2.9.17', 'Settings & Page Polish: fixed repeated Settings reloads after completed Plex refreshes, stabilised progress/status panels, refreshed static asset caching, and added compact MyCouch mascot artwork to the top-right of key pages.'),
         ('v2.9.16', 'Universal Media Preview: larger rich movie and TV preview cards now work across MyCouch wherever a local movie/show detail link appears, including Dashboard shelves, Now Playing, Movies, TV, Smart Search, History, Review Queue and Leaving Soon. Previews are fetched from the local cache on demand and reused in-browser.'),
         ('v2.9.15.2', 'Smart Search intent fix: multi-person searches such as “Ben Affleck and Matt Damon together” now require both people in the same title, while person-plus-role searches such as “Robin Williams in a serious role” combine the actor match with dramatic genre intent instead of matching unrelated words.'),
         ('v2.9.15.1', 'Smart Search people-ranking fix: full actor/director name matches now receive a strong ranking boost, and the People match badge is only shown when the searched person actually matches cached Plex people metadata. Also restores the missing v2.9.15 entry on the visible Changelog page.'),

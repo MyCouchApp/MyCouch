@@ -1,11 +1,13 @@
 {% extends 'base.html' %}{% block content %}
-<div class="page-head"><div class="branded-heading"><span class="couch-icon couch-icon-settings" role="img" aria-label="MyCouch mascot"></span><h1>Settings</h1></div></div>
+<div class="page-head"><div class="branded-heading"><span class="couch-icon couch-icon-settings" role="img" aria-label="MyCouch mascot"></span>
+  <h1>Settings</h1>
+<img class="page-corner-mascot" src="/static/mascots/server-card.png" alt="" aria-hidden="true"></div></div>
 <div class="card p-3 mb-4">
   <div class="d-flex justify-content-between align-items-center gap-3">
     <div><h5 class="mb-1">Local library cache</h5><p class="text-muted mb-0">{% if cache %}Last refreshed: <b>{{cache.refreshed_at}}</b><br>{{cache.movie_files}} movie files · {{cache.tv_shows}} TV shows · {{cache.episodes}} episodes{% else %}Not built yet.{% endif %}</p></div>
     <form method="post" action="/refresh-cache" id="refreshForm"><input type="hidden" name="_csrf" value="{{csrf_token()}}"><button class="btn btn-success" type="submit" id="refreshBtn">Update Plex Now</button></form>
   </div>
-  <div id="buildPanel" class="build-panel mt-3 d-none">
+  <div id="buildPanel" class="build-panel mt-3 d-none settings-progress-panel">
     <div class="d-flex justify-content-between"><strong id="buildStage">Starting…</strong><span id="buildPct">0%</span></div>
     <div class="progress mt-2" role="progressbar"><div id="buildBar" class="progress-bar progress-bar-striped progress-bar-animated" style="width:0%"></div></div>
     <div class="d-flex justify-content-between mt-2 small text-muted"><span id="buildMessage">Preparing cache build…</span><span>Elapsed: <span id="buildElapsed">00:00</span></span></div>
@@ -54,7 +56,7 @@
     <form method="post" action="/integrations/test/sonarr"><input type="hidden" name="_csrf" value="{{csrf_token()}}"><button class="btn btn-outline-light" {% if not integrations.sonarr_key %}disabled{% endif %}>Test Sonarr</button></form>
     <form method="post" action="/integrations/sync"><input type="hidden" name="_csrf" value="{{csrf_token()}}"><button class="btn btn-success" {% if not integrations.radarr_key or not integrations.sonarr_key or not cache %}disabled{% endif %}>Match Plex ↔ Arr</button></form>
   </div>
-  <div id="arrPanel" class="build-panel mt-3 d-none">
+  <div id="arrPanel" class="build-panel mt-3 d-none settings-progress-panel">
     <div class="d-flex justify-content-between"><strong id="arrStage">Starting…</strong><span id="arrPct">0%</span></div>
     <div class="progress mt-2" role="progressbar"><div id="arrBar" class="progress-bar progress-bar-striped progress-bar-animated" style="width:0%"></div></div>
     <div class="d-flex justify-content-between mt-2 small text-muted"><span id="arrMessage">Preparing Arr match…</span><span>Elapsed: <span id="arrElapsed">00:00</span></span></div>
@@ -77,7 +79,7 @@
     <form method="post" action="/tautulli/sync"><input type="hidden" name="_csrf" value="{{csrf_token()}}"><button class="btn btn-success" {% if not tautulli.key %}disabled{% endif %}>Update Now</button></form>
     <form method="post" action="/tautulli/full-rescan" onsubmit="return confirm('Full Rescan rebuilds the complete local Tautulli history cache. Continue?')"><input type="hidden" name="_csrf" value="{{csrf_token()}}"><button class="btn btn-outline-warning" {% if not tautulli.key %}disabled{% endif %}>Full Rescan</button></form>
   </div>
-  <div id="tautulliPanel" class="build-panel mt-3 d-none">
+  <div id="tautulliPanel" class="build-panel mt-3 d-none settings-progress-panel">
     <div class="d-flex justify-content-between"><strong id="tautulliStage">Starting…</strong><span id="tautulliPct">0%</span></div>
     <div class="progress mt-2"><div id="tautulliBar" class="progress-bar progress-bar-striped progress-bar-animated" style="width:0%"></div></div>
     <div class="d-flex justify-content-between mt-2 small text-muted"><span id="tautulliMessage">Preparing history sync…</span><span>Elapsed: <span id="tautulliElapsed">00:00</span></span></div>
@@ -154,7 +156,16 @@
 <script>
 const panel=document.getElementById('buildPanel'), btn=document.getElementById('refreshBtn');
 function fmt(sec){sec=Math.floor(sec||0);return String(Math.floor(sec/60)).padStart(2,'0')+':'+String(sec%60).padStart(2,'0')}
-async function poll(){try{const r=await fetch('/api/cache-status',{cache:'no-store'}),s=await r.json();if(s.running||s.complete||s.error){panel.classList.remove('d-none');document.getElementById('buildStage').textContent=s.stage;document.getElementById('buildPct').textContent=s.percent+'%';document.getElementById('buildBar').style.width=s.percent+'%';document.getElementById('buildMessage').textContent=s.message||'';document.getElementById('buildElapsed').textContent=fmt(s.elapsed);btn.disabled=!!s.running;btn.textContent=s.running?'Updating Plex…':'Update Plex Now';if(s.error){document.getElementById('buildBar').classList.add('bg-danger');}if(s.complete){document.getElementById('buildBar').classList.remove('progress-bar-animated');document.getElementById('buildBar').classList.add('bg-success');if(!window._reloaded){window._reloaded=true;setTimeout(()=>location.reload(),1200)}}}if(s.running)setTimeout(poll,500);}catch(e){setTimeout(poll,1500)}}
+async function poll(){try{const r=await fetch('/api/cache-status',{cache:'no-store'}),s=await r.json();if(s.running||s.complete||s.error){panel.classList.remove('d-none');document.getElementById('buildStage').textContent=s.stage;document.getElementById('buildPct').textContent=s.percent+'%';document.getElementById('buildBar').style.width=s.percent+'%';document.getElementById('buildMessage').textContent=s.message||'';document.getElementById('buildElapsed').textContent=fmt(s.elapsed);btn.disabled=!!s.running;btn.textContent=s.running?'Updating Plex…':'Update Plex Now';if(s.error){document.getElementById('buildBar').classList.add('bg-danger');}if(s.complete){
+  document.getElementById('buildBar').classList.remove('progress-bar-animated');
+  document.getElementById('buildBar').classList.add('bg-success');
+  const buildKey=String(s.started_at||'complete');
+  const reloadKey='mycouch-cache-build-reloaded';
+  if(sessionStorage.getItem(reloadKey)!==buildKey){
+    sessionStorage.setItem(reloadKey,buildKey);
+    setTimeout(()=>{ window.location.href='/settings'; },1200);
+  }
+}}if(s.running)setTimeout(poll,500);}catch(e){setTimeout(poll,1500)}}
 poll();
 const arrPanel=document.getElementById('arrPanel');
 function arrSummary(s){
