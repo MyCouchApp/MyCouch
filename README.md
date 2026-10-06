@@ -1,8 +1,8 @@
 # 🛋️ MyCouch
 
-**Current release: v2.9.16**
+**Current release: v2.9.17**
 
-v2.9.16 introduces Universal Media Preview: larger, richer movie and TV cards that appear anywhere MyCouch has a recognised local title link. Preview data is loaded on demand from the local cache and reused in the browser, keeping the experience fast.
+v2.9.17 focuses on Settings and page polish: Plex cache refresh progress is now stable after an update completes, key pages use compact MyCouch mascot artwork, and Movies/TV keep their export controls neatly positioned alongside the refreshed layout. It retains the people-aware Smart Search, Universal Media Preview and private-access model introduced across the recent releases.
 
 <img src="static/mycouch-github.png" alt="MyCouch couch mascot" width="180">
 
@@ -12,8 +12,20 @@ MyCouch is a self-hosted companion for exploring and understanding a Plex media 
 
 > MyCouch is an independent project and is not affiliated with Plex, Tautulli, Radarr, Sonarr, Discord, Emby or Jellyfin.
 
-## Current release — v2.9.16
+## Current release — v2.9.17
 
+
+### v2.9.17 — Settings & Page Polish
+
+- Fixed repeated Settings page reloads after a completed Plex cache refresh.
+- Stabilised the Plex update progress and status display.
+- Added compact existing MyCouch mascot artwork to the top-right of key pages without adding unnecessary page height.
+- Kept the Changelog clean and mascot-free.
+- Repositioned the Movies and TV **Export CSV** controls below their page mascots.
+- Refreshed static asset and PWA cache versions so updated styling is picked up reliably.
+- Plex library cache updates remain configurable in Settings, including daily, every 12 hours and every 6 hours, with **Update Plex Now** available for an immediate refresh.
+
+**Upgrade note:** no database migration is required. Existing runtime databases and `.pla-secret` remain compatible. A manual **Update Plex Now** is useful if Plex library artwork, links or metadata appear stale.
 
 ### v2.9.16 — Universal Media Preview
 
