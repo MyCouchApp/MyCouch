@@ -2,7 +2,7 @@
 
 **Current release: v2.9.17**
 
-v2.9.17 focuses on Settings and page polish: Plex cache refresh progress is now stable after an update completes, key pages use compact MyCouch mascot artwork, and Movies/TV keep their export controls neatly positioned alongside the refreshed layout. It retains the people-aware Smart Search, Universal Media Preview and private-access model introduced across the recent releases.
+v2.9.17 focuses on Settings and page polish: Plex cache refresh progress is now stable after an update completes, key pages use centered mascot-led headers, and Movies/TV keep Export CSV at the far right of the library filter bar. It retains the people-aware Smart Search, Universal Media Preview and private-access model introduced across recent releases.
 
 <img src="static/mycouch-github.png" alt="MyCouch couch mascot" width="180">
 
@@ -19,9 +19,9 @@ MyCouch is a self-hosted companion for exploring and understanding a Plex media 
 
 - Fixed repeated Settings page reloads after a completed Plex cache refresh.
 - Stabilised the Plex update progress and status display.
-- Added compact existing MyCouch mascot artwork to the top-right of key pages without adding unnecessary page height.
-- Kept the Changelog clean and mascot-free.
-- Repositioned the Movies and TV **Export CSV** controls below their page mascots.
+- Reworked key pages with centered MyCouch mascot-led headers, page titles and short descriptions.
+- Kept the Dashboard design unchanged and the Changelog mascot-free.
+- Moved **Export CSV** to the far right of the Movies and TV filter/control bar.
 - Refreshed static asset and PWA cache versions so updated styling is picked up reliably.
 - Plex library cache updates remain configurable in Settings, including daily, every 12 hours and every 6 hours, with **Update Plex Now** available for an immediate refresh.
 
