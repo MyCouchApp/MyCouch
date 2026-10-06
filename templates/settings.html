@@ -1,7 +1,9 @@
 {% extends 'base.html' %}{% block content %}
-<div class="page-head"><div class="branded-heading"><span class="couch-icon couch-icon-settings" role="img" aria-label="MyCouch mascot"></span>
+<section class="mc-page-hero mb-4">
+  <img src="/static/mascots/server-card.png" alt="" aria-hidden="true">
   <h1>Settings</h1>
-<img class="page-corner-mascot" src="/static/mascots/server-card.png" alt="" aria-hidden="true"></div></div>
+  <p>Configure your library cache, integrations, schedules and MyCouch preferences.</p>
+</section>
 <div class="card p-3 mb-4">
   <div class="d-flex justify-content-between align-items-center gap-3">
     <div><h5 class="mb-1">Local library cache</h5><p class="text-muted mb-0">{% if cache %}Last refreshed: <b>{{cache.refreshed_at}}</b><br>{{cache.movie_files}} movie files · {{cache.tv_shows}} TV shows · {{cache.episodes}} episodes{% else %}Not built yet.{% endif %}</p></div>

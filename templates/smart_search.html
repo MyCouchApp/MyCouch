@@ -1,7 +1,9 @@
 {% extends 'base.html' %}{% block content %}
-<div class="page-head"><div class="branded-heading"><span class="couch-icon couch-icon-search" role="img" aria-label="MyCouch mascot"></span><div>
+<section class="mc-page-hero mb-4">
+  <img src="/static/mascots/search-card.png" alt="" aria-hidden="true">
   <h1>Smart Search</h1>
-<img class="page-corner-mascot" src="/static/mascots/search-card.png" alt="" aria-hidden="true"><p class="muted">Describe the movie you want instead of remembering its title.</p></div></div></div>
+  <p>Describe the movie you want instead of remembering its title.</p>
+</section>
 <section class="panel mb-4">
   {% if not people_ready %}<div class="alert alert-info py-2 small"><strong>v2.9.15 people search:</strong> Run Update Plex Now once in Settings to add actor and director metadata to your existing cache.</div>{% endif %}
   <form method="get" action="{{ url_for('smart_search') }}" id="smart-search-form"><div class="input-group input-group-lg"><input autofocus class="form-control" name="q" value="{{q}}" placeholder="man stuck in wilderness and struggles to get home"><button class="btn btn-primary" id="smart-search-button" type="submit">Search</button></div>
