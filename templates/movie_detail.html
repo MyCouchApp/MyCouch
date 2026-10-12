@@ -14,7 +14,7 @@
     {% if m.genre_list %}<div class="detail-genres">{% for g in m.genre_list %}<span>{{g}}</span>{% endfor %}</div>{% endif %}{% if m.director_list or m.actor_list %}<div class="detail-people">{% if m.director_list %}<div><b>Directed by</b> {{m.director_list|join(', ')}}</div>{% endif %}{% if m.actor_list %}<div><b>Cast</b> {{m.actor_list|join(', ')}}</div>{% endif %}</div>{% endif %}
     {% if m.summary %}<p class="detail-summary">{{m.summary}}</p>{% else %}<p class="detail-summary muted">No synopsis is available from Plex for this title.</p>{% endif %}
     <div class="detail-actions">
-      {% if m.plex_url %}<a class="btn btn-warning" href="{{m.plex_url}}" target="_blank" rel="noopener">▶ Open in Plex</a>{% endif %}
+      {% if m.plex_url %}<a class="btn btn-warning" href="{{m.plex_url}}" target="_blank" rel="noopener">▶ Open in Plex</a>{% endif %}<button class="btn btn-outline-info mc-playlist-action" type="button" data-playlist-id="{{m.metadata_id}}" onclick="mcAddToPlaylist(this.dataset.playlistId,this)">Add to My Playlist</button>
       {% if m.arr_url and is_admin() %}<a class="btn btn-outline-info" href="{{m.arr_url}}" target="_blank">Open in Radarr ↗</a>
       {% elif m.arr_url %}<span class="badge text-bg-success">Radarr matched</span>
       {% elif m.arr_status=='alternate' %}<span class="badge text-bg-warning">Alternate / duplicate?</span>

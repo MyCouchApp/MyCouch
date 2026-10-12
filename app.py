@@ -1,7 +1,7 @@
 import os, sqlite3, csv, io, shutil, tempfile, time, threading, json, urllib.request, urllib.error, secrets, re, math, mimetypes, xml.etree.ElementTree as ET
 from datetime import datetime, timezone, timedelta
 from urllib.parse import urlencode, quote
-from flask import Flask, render_template, request, redirect, url_for, Response, abort, flash, session, g, send_from_directory
+from flask import Flask, render_template, request, redirect, url_for, Response, abort, flash, session, g, send_from_directory, jsonify
 import requests
 
 from werkzeug.security import generate_password_hash, check_password_hash
@@ -21,7 +21,7 @@ def _app_secret():
 app=Flask(__name__); app.secret_key=_app_secret()
 app.config.update(SESSION_COOKIE_HTTPONLY=True,SESSION_COOKIE_SAMESITE='Lax',SESSION_COOKIE_SECURE=(os.environ.get('MYCOUCH_SECURE_COOKIE') or os.environ.get('PLA_SECURE_COOKIE','0'))=='1',PERMANENT_SESSION_LIFETIME=timedelta(days=30))
 BUILD_LOCK=threading.Lock()
-APP_VERSION='2.9.17'
+APP_VERSION='2.9.18.8'
 PLEX_UPDATE_STATUS={'running':False,'last_update':None,'error':None}
 SMART_LOCK=threading.Lock(); SMART_MODEL=None; SMART_VECTORS=None; SMART_IDS=None
 BUILD_STATUS={'running':False,'stage':'Idle','percent':0,'current':0,'total':0,'message':'','started_at':None,'elapsed':0,'error':None,'complete':False}
@@ -63,6 +63,8 @@ def config():
     c.execute('create index if not exists idx_smart_search_history_recent on smart_search_history(owner_key,searched_at desc)')
     c.execute('create table if not exists mobile_auth_pending(state text primary key,pin_id integer not null,created_at integer not null)')
     c.execute('create table if not exists mobile_auth_codes(code text primary key,profile_json text not null,expires_at integer not null)')
+    # Plex user tokens are kept server-side only so user-specific Plex actions (such as playlists) never expose tokens to the browser.
+    c.execute('create table if not exists plex_user_tokens(owner_key text primary key,token text not null,updated_at integer not null)')
     c.execute('create table if not exists security_events(id integer primary key autoincrement,event_type text not null,ip text,path text,method text,user_agent text,detail text,created_at integer not null)')
     c.execute('create index if not exists idx_security_events_created on security_events(created_at desc)')
 
@@ -115,6 +117,26 @@ def service_worker():
 
 def plex_user():
     return session.get('plex_user') or {}
+
+def _plex_user_owner_key(profile=None):
+    profile=profile or plex_user()
+    return str(profile.get('uuid') or profile.get('id') or profile.get('username') or profile.get('email') or '').strip()
+
+def _save_plex_user_token(profile, token):
+    owner=_plex_user_owner_key(profile)
+    if not owner or not token: return
+    c=config(); c.execute('insert or replace into plex_user_tokens(owner_key,token,updated_at) values(?,?,?)',(owner,token,int(time.time()))); c.commit(); c.close()
+
+def _plex_user_token(profile=None):
+    owner=_plex_user_owner_key(profile)
+    if not owner: return ''
+    c=config(); row=c.execute('select token from plex_user_tokens where owner_key=?',(owner,)).fetchone(); c.close()
+    return (row['token'] if row else '') or ''
+
+def _forget_plex_user_token(profile=None):
+    owner=_plex_user_owner_key(profile)
+    if not owner: return
+    c=config(); c.execute('delete from plex_user_tokens where owner_key=?',(owner,)); c.commit(); c.close()
 
 def has_plex_access():
     machine=setting('plex_machine_id','').strip()
@@ -184,7 +206,7 @@ app.jinja_env.filters['timestamp_date']=lambda v: datetime.fromtimestamp(int(v))
 app.jinja_env.filters['timestamp_datetime']=lambda v: datetime.fromtimestamp(int(v)).strftime('%d %b %Y %H:%M:%S') if v else '—'
 
 # Endpoints that expose library/history data require a verified Plex account.
-PLEX_ENDPOINTS={'dashboard','movie_page','tv_page','movie_detail','show_detail','smart_search','smart_search_history_clear','smart_search_poster','now_playing_api','media_preview_api','cleanup','my_history','changelog'}
+PLEX_ENDPOINTS={'dashboard','movie_page','tv_page','movie_detail','show_detail','smart_search','tonight_on_mycouch','tonight_playlist_add','my_playlist','playlist_add_api','playlist_remove_api','smart_search_history_clear','smart_search_poster','now_playing_api','media_preview_api','cleanup','my_history','changelog'}
 # These are reachable before Plex authorization. Dashboard renders only the landing page while signed out.
 ANON_ENDPOINTS={'dashboard','setup_admin','login','logout','static','service_worker','robots_txt','plex_signin','plex_callback','plex_mobile_callback','plex_mobile_finalize','plex_logout'}
 
@@ -345,7 +367,8 @@ def plex_mobile_callback():
             raise RuntimeError(reason)
         safe_profile={'id':profile.get('id'),'uuid':profile.get('uuid'),'username':profile.get('username') or '',
                       'title':profile.get('title') or profile.get('friendlyName') or '',
-                      'email':profile.get('email') or '', 'thumb':profile.get('thumb') or '', '_server_access':setting('plex_machine_id','').strip()}
+                      'email':profile.get('email') or '', 'thumb':profile.get('thumb') or '', '_server_access':setting('plex_machine_id','').strip(),
+                      '_plex_token':token}
 
         auth_code=secrets.token_urlsafe(32)
         c=config()
@@ -373,7 +396,9 @@ def plex_mobile_finalize():
     c.commit(); c.close()
     profile=json.loads(row['profile_json'])
     session['plex_server_access']=profile.pop('_server_access','')
+    user_token=profile.pop('_plex_token','')
     session['plex_user']=profile
+    _save_plex_user_token(profile,user_token)
     session.pop('plex_pin_id',None)
     security_log('plex_login','Authorized Plex server user')
     flash('Signed in with Plex.','success')
@@ -399,6 +424,7 @@ def plex_callback():
         session['plex_user']={'id':profile.get('id'),'uuid':profile.get('uuid'),'username':profile.get('username') or '',
                               'title':profile.get('title') or profile.get('friendlyName') or '',
                               'email':profile.get('email') or '', 'thumb':profile.get('thumb') or ''}
+        _save_plex_user_token(session['plex_user'],token)
         session['plex_server_access']=setting('plex_machine_id','').strip()
         session.pop('plex_pin_id',None)
         security_log('plex_login','Authorized Plex server user')
@@ -411,7 +437,7 @@ def plex_callback():
 
 @app.post('/plex/logout')
 def plex_logout():
-    security_log('plex_logout','Plex session ended'); session.pop('plex_user',None); session.pop('plex_server_access',None); session.pop('plex_pin_id',None)
+    security_log('plex_logout','Plex session ended'); _forget_plex_user_token(); session.pop('plex_user',None); session.pop('plex_server_access',None); session.pop('plex_pin_id',None)
     flash('Plex account signed out.','success')
     return redirect(url_for('dashboard'))
 
@@ -1685,6 +1711,291 @@ def _remember_smart_search(q,owner_key=None):
     c.execute('delete from smart_search_history where owner_key=? and id not in (select id from smart_search_history where owner_key=? order by searched_at desc limit 100)',(owner_key,owner_key))
     c.commit(); c.close()
 
+
+
+TONIGHT_MODES={
+    'quick':('Quick Watch','Shorter movies that get you into the story without taking over the night.'),
+    'movie-night':('Movie Night','A highly rated pick for when you want to settle in for a proper movie.'),
+    'different':('Something Different','A good title from genres you watch less often.'),
+    'comfort':('Comfort Watch','Something familiar and well rated that you have already enjoyed.'),
+    'surprise':('Surprise Me','No rules. Give MyCouch permission to pick something worth watching.'),
+}
+
+def _tonight_candidates(mode, limit=3):
+    """Return fast local movie picks for Tonight on MyCouch.
+
+    This path deliberately reads only MyCouch's local cache/config databases. It
+    does not reopen the live Plex database or build the full Movies page model,
+    keeping mode changes and reshuffles responsive even while Plex is busy.
+    """
+    if mode not in TONIGHT_MODES or not cache_ready(): return []
+
+    # The cache already contains rating, genres, watched state and runtime. Read
+    # it directly instead of movies(), which also assembles Arr/review metadata,
+    # and avoid _plex_ratings(), which reopens the live Plex SQLite database.
+    rows=qcache('select metadata_id,title,year,duration,size_gb,watched,genres,rating from movies')
+    protected=protected_set('movie')
+    activity=tautulli_activity('movie')
+
+    # Collapse duplicate movie versions while keeping the largest copy.
+    unique={}
+    for r in rows:
+        key=(r.get('title'),r.get('year'))
+        if key not in unique or (r.get('size_gb') or 0)>(unique[key].get('size_gb') or 0):
+            unique[key]=r
+    rows=list(unique.values())
+
+    watched_genres={}
+    for r in rows:
+        if not r.get('watched'): continue
+        for g in _clean_genres(r.get('genres')):
+            watched_genres[g]=watched_genres.get(g,0)+1
+
+    seen=[int(x) for x in session.get('tonight_seen',[]) if str(x).isdigit()]
+    seen_set=set(seen)
+    scored=[]
+    for r in rows:
+        if r.get('title') in protected or r.get('metadata_id') is None: continue
+        item_id=int(r['metadata_id'])
+        mins=round((r.get('duration') or 0)/60000) if r.get('duration') else 0
+        try: rating=float(r.get('rating')) if r.get('rating') is not None else None
+        except (TypeError,ValueError): rating=None
+        genres=_clean_genres(r.get('genres'))
+        watched=bool(r.get('watched'))
+        a=activity.get(item_id) or {}
+        plays=int(a.get('plays') or 0)
+        last=int(a.get('last_watched') or 0)
+        score=(rating or 0)*8.0
+
+        if mode=='quick':
+            if not mins or mins>100: continue
+            if watched: score-=8
+            score+=max(0,100-mins)*0.22
+        elif mode=='movie-night':
+            if rating is None or rating<6.5: continue
+            if mins and mins<85: score-=5
+            if watched: score-=5
+        elif mode=='different':
+            if watched: score-=12
+            rarity=sum(1/(1+watched_genres.get(g,0)) for g in genres) if genres else 0
+            score+=rarity*35
+        elif mode=='comfort':
+            if not watched and plays<=0: continue
+            # Comfort should mean familiar, not merely watched once. Repeat plays
+            # and frequently watched genres matter much more than raw rating.
+            familiar=sum(watched_genres.get(g,0) for g in genres)
+            score+=(12 if watched else 0)+min(plays,10)*6.0+min(familiar,30)*0.7
+            if plays<=1: score-=10
+            if last: score+=3
+        elif mode=='surprise':
+            if watched: score-=4
+            score+=((item_id*2654435761) % 97)/10
+
+        if item_id in seen_set: score-=1000
+        scored.append((score,r,rating,genres,mins))
+
+    scored.sort(key=lambda x:(x[0],x[2] or 0),reverse=True)
+    chosen=scored[:limit]
+    if len(chosen)<limit:
+        chosen=sorted([(x[0]+(1000 if int(x[1]['metadata_id']) in seen_set else 0),*x[1:]) for x in scored],key=lambda x:x[0],reverse=True)[:limit]
+
+    out=[]
+    for score,r,rating,genres,mins in chosen:
+        item_id=int(r['metadata_id'])
+        if mode=='quick': reason=f'Runs {_runtime_display(mins)}, so it fits a quicker watch without taking over the night.'
+        elif mode=='movie-night': reason=(f'Rated {rating:.1f}/10 in Plex and has the profile of a proper sit-down movie.' if rating is not None else 'A strong library pick for a proper sit-down movie.')
+        elif mode=='different':
+            rare=sorted(genres,key=lambda g:watched_genres.get(g,0))[:2]
+            reason='A chance to step outside your usual viewing habits'+(f" with {' / '.join(rare)}." if rare else '.')
+        elif mode=='comfort': reason=('You have come back to this before, and it fits genres that are familiar in your viewing history.' if int((activity.get(item_id) or {}).get('plays') or 0)>1 else 'A familiar title from genres that show up often in your viewing history.')
+        else: reason='A wildcard from your own library, chosen from the stronger available candidates.'
+        x=dict(r)
+        x.update({'rating':rating,'genre_list':genres,'genres_display':' · '.join(genres[:3]),'runtime_minutes':mins,
+                  'runtime_display':_runtime_display(mins),'plex_url':_plex_web_link(item_id),'why':reason})
+        out.append(x)
+    session['tonight_seen']=(seen+[int(x['metadata_id']) for x in out])[-30:]
+    session.modified=True
+    return out
+
+def _plex_playlist_container(data):
+    if not isinstance(data,dict): return []
+    return ((data.get('MediaContainer') or {}).get('Metadata') or [])
+
+def _mycouch_playlist_web_url():
+    """Return the signed-in Plex user's MyCouch Picks URL, if it exists."""
+    token=_plex_user_token()
+    if not token:
+        raise RuntimeError('Sign out of Plex and sign back in once to open your personal MyCouch Picks playlist.')
+    base=setting('plex_url','http://localhost:32400').rstrip('/')
+    machine=setting('plex_machine_id','').strip()
+    if not machine: raise RuntimeError('Plex server identity is not configured.')
+    headers={'X-Plex-Token':token,'Accept':'application/json'}
+    playlists=requests.get(base+'/playlists',headers=headers,params={'playlistType':'video'},timeout=12)
+    playlists.raise_for_status()
+    for row in _plex_playlist_container(playlists.json()):
+        if (row.get('title') or '').strip().lower()=='mycouch picks':
+            playlist_id=row.get('ratingKey') or row.get('key','').strip('/').split('/')[-1]
+            if playlist_id:
+                key=urllib.parse.quote('/playlists/'+str(playlist_id),safe='')
+                return f"https://app.plex.tv/desktop/#!/server/{machine}/details?key={key}"
+    return None
+
+def _mycouch_playlist_data():
+    """Return the signed-in user's MyCouch Picks playlist and its Plex items."""
+    token=_plex_user_token()
+    if not token:
+        raise RuntimeError('Sign out of Plex and sign back in once to use your personal MyCouch Picks playlist.')
+    base=setting('plex_url','http://localhost:32400').rstrip('/')
+    headers={'X-Plex-Token':token,'Accept':'application/json'}
+    playlists=requests.get(base+'/playlists',headers=headers,params={'playlistType':'video'},timeout=12)
+    playlists.raise_for_status()
+    playlist=None
+    for row in _plex_playlist_container(playlists.json()):
+        if (row.get('title') or '').strip().lower()=='mycouch picks':
+            playlist=row; break
+    if not playlist: return None,[]
+    playlist_id=playlist.get('ratingKey') or playlist.get('key','').strip('/').split('/')[-1]
+    if not playlist_id: raise RuntimeError('Plex returned an invalid playlist identifier.')
+    detail=requests.get(f'{base}/playlists/{playlist_id}/items',headers=headers,timeout=12)
+    detail.raise_for_status()
+    return dict(playlist,playlist_id=str(playlist_id)),_plex_playlist_container(detail.json())
+
+@app.get('/my-playlist')
+def my_playlist():
+    try:
+        playlist,plex_items=_mycouch_playlist_data()
+        items=[]
+        for row in plex_items:
+            item_id=int(row.get('ratingKey') or 0)
+            kind='show' if (row.get('type') or '').lower()=='show' else 'movie'
+            cached=[]
+            if item_id:
+                cached=qcache('select * from shows where show_id=? limit 1',(item_id,)) if kind=='show' else qcache('select * from movies where metadata_id=? limit 1',(item_id,))
+            c=cached[0] if cached else {}
+            duration=c.get('duration') if kind=='movie' else None
+            mins=(round(duration/60000) if duration and duration>10000 else round(duration/60)) if duration else None
+            items.append({
+                'item_id':item_id,'kind':kind,'title':c.get('title') or row.get('title') or 'Unknown title',
+                'year':c.get('year') or row.get('year'),'rating':c.get('rating') if c else row.get('rating'),
+                'genres':_clean_genres(c.get('genres','')) if c else [],'runtime_display':_runtime_display(mins) if mins else '',
+                'playlist_item_id':row.get('playlistItemID') or row.get('playlistItemId'),'plex_url':_plex_web_link(item_id) if item_id else None
+            })
+        return render_template('my_playlist.html',playlist=playlist,items=items,error=None)
+    except Exception as e:
+        return render_template('my_playlist.html',playlist=None,items=[],error=str(e))
+
+@app.get('/playlist/mycouch-picks')
+def mycouch_playlist_open():
+    # Kept for old bookmarks/buttons; the playlist now lives inside MyCouch.
+    return redirect(url_for('my_playlist'))
+
+@app.post('/api/playlist/remove')
+def playlist_remove_api():
+    try:
+        data=request.get_json(silent=True) or {}
+        item_id=int(data.get('item_id') or 0)
+        if item_id<=0: raise RuntimeError('Invalid Plex item.')
+        playlist,items=_mycouch_playlist_data()
+        if not playlist: return jsonify({'ok':True,'message':'MyCouch Picks is already empty.'})
+        match=next((r for r in items if str(r.get('ratingKey') or '')==str(item_id)),None)
+        if not match: return jsonify({'ok':True,'message':'Already removed from MyCouch Picks.'})
+        playlist_item_id=match.get('playlistItemID') or match.get('playlistItemId')
+        if not playlist_item_id: raise RuntimeError('Plex did not return a playlist item identifier.')
+        token=_plex_user_token(); base=setting('plex_url','http://localhost:32400').rstrip('/')
+        headers={'X-Plex-Token':token,'Accept':'application/json'}
+        removed=requests.delete(f"{base}/playlists/{playlist['playlist_id']}/items/{playlist_item_id}",headers=headers,timeout=12)
+        if not removed.ok:
+            # Plex can mutate successfully despite a poor response; verify before failing.
+            _p,verify=_mycouch_playlist_data()
+            if any(str(r.get('ratingKey') or '')==str(item_id) for r in verify): removed.raise_for_status()
+        return jsonify({'ok':True,'message':'Removed from MyCouch Picks.'})
+    except Exception as e:
+        return jsonify({'ok':False,'message':'Could not remove from Plex playlist: '+str(e)}),400
+
+def _add_to_mycouch_playlist(item_id):
+    token=_plex_user_token()
+    if not token:
+        raise RuntimeError('Sign out of Plex and sign back in once to enable your personal MyCouch Picks playlist.')
+    base=setting('plex_url','http://localhost:32400').rstrip('/')
+    machine=setting('plex_machine_id','').strip()
+    if not machine: raise RuntimeError('Plex server identity is not configured.')
+    headers={'X-Plex-Token':token,'Accept':'application/json'}
+    # Confirm this user can resolve the item before changing their playlist.
+    check=requests.get(f'{base}/library/metadata/{int(item_id)}',headers=headers,timeout=12)
+    if not check.ok: raise RuntimeError('Plex could not open this movie for the signed-in user.')
+    playlists=requests.get(base+'/playlists',headers=headers,params={'playlistType':'video'},timeout=12)
+    playlists.raise_for_status()
+    existing=None
+    for row in _plex_playlist_container(playlists.json()):
+        if (row.get('title') or '').strip().lower()=='mycouch picks': existing=row; break
+    uri=f'server://{machine}/com.plexapp.plugins.library/library/metadata/{int(item_id)}'
+    if existing:
+        playlist_id=existing.get('ratingKey') or existing.get('key','').strip('/').split('/')[-1]
+        if not playlist_id: raise RuntimeError('Plex returned an invalid playlist identifier.')
+        # Avoid duplicates where Plex exposes playlist children.
+        detail=requests.get(f'{base}/playlists/{playlist_id}/items',headers=headers,timeout=12)
+        if detail.ok:
+            for row in _plex_playlist_container(detail.json()):
+                if str(row.get('ratingKey') or '')==str(item_id):
+                    return 'Already in MyCouch Picks'
+        added=requests.put(f'{base}/playlists/{playlist_id}/items',headers=headers,params={'uri':uri},timeout=12)
+        if not added.ok:
+            # Plex can occasionally apply the playlist mutation but still return an error.
+            # Verify the resulting playlist before reporting failure to the browser.
+            verify=requests.get(f'{base}/playlists/{playlist_id}/items',headers=headers,timeout=12)
+            if verify.ok:
+                for row in _plex_playlist_container(verify.json()):
+                    if str(row.get('ratingKey') or '')==str(item_id):
+                        return 'Added to MyCouch Picks'
+            added.raise_for_status()
+        return 'Added to MyCouch Picks'
+    created=requests.post(base+'/playlists',headers=headers,params={'type':'video','title':'MyCouch Picks','smart':'0','uri':uri},timeout=12)
+    if not created.ok:
+        # As above, verify whether Plex created the playlist/item despite its response.
+        verify_lists=requests.get(base+'/playlists',headers=headers,params={'playlistType':'video'},timeout=12)
+        if verify_lists.ok:
+            for playlist in _plex_playlist_container(verify_lists.json()):
+                if (playlist.get('title') or '').strip().lower()!='mycouch picks':
+                    continue
+                verify_id=playlist.get('ratingKey') or playlist.get('key','').strip('/').split('/')[-1]
+                if not verify_id:
+                    continue
+                verify=requests.get(f'{base}/playlists/{verify_id}/items',headers=headers,timeout=12)
+                if verify.ok and any(str(row.get('ratingKey') or '')==str(item_id) for row in _plex_playlist_container(verify.json())):
+                    return 'Added to new MyCouch Picks playlist'
+        created.raise_for_status()
+    return 'Added to new MyCouch Picks playlist'
+
+@app.post('/api/playlist/add')
+def playlist_add_api():
+    try:
+        data=request.get_json(silent=True) or {}
+        item_id=int(data.get('item_id') or request.form.get('item_id') or 0)
+        if item_id<=0: raise RuntimeError('Invalid Plex item.')
+        message=_add_to_mycouch_playlist(item_id)
+        return jsonify({'ok':True,'message':message,'playlist_url':url_for('my_playlist')})
+    except Exception as e:
+        return jsonify({'ok':False,'message':'Could not add to Plex playlist: '+str(e)}),400
+
+@app.post('/tonight/playlist/add')
+def tonight_playlist_add():
+    try:
+        item_id=int(request.form.get('item_id') or 0)
+        if item_id<=0: raise RuntimeError('Invalid movie.')
+        message=_add_to_mycouch_playlist(item_id)
+        flash(message,'success')
+    except Exception as e:
+        flash('Could not add to Plex playlist: '+str(e),'danger')
+    mode=(request.form.get('mode') or '').strip().lower()
+    return redirect(url_for('tonight_on_mycouch',mode=mode if mode in TONIGHT_MODES else 'surprise'))
+
+@app.get('/tonight')
+def tonight_on_mycouch():
+    mode=(request.args.get('mode') or '').strip().lower()
+    if request.args.get('reset')=='1': session.pop('tonight_seen',None)
+    picks=_tonight_candidates(mode,3) if mode in TONIGHT_MODES else []
+    return render_template('tonight.html',modes=TONIGHT_MODES,mode=mode,picks=picks,cache_ready=cache_ready())
+
 @app.get('/smart-search')
 def smart_search():
     q=(request.args.get('q') or '').strip()[:500]; owner_key=_smart_search_owner_key()
@@ -2081,7 +2392,7 @@ def media_preview_api(kind,item_id):
     activity=tautulli_activity(activity_kind).get(item_id) or {}
     data={
         'kind':kind,'item_id':item_id,'title':r.get('title') or 'Unknown title','year':r.get('year'),
-        'poster_url':url_for('smart_search_poster',item_id=item_id),'details_url':f"/{kind}/{item_id}" if kind=='movie' else f"/show/{item_id}",
+        'item_id':item_id,'poster_url':url_for('smart_search_poster',item_id=item_id),'details_url':f"/{kind}/{item_id}" if kind=='movie' else f"/show/{item_id}",
         'plex_url':_plex_web_link(item_id),'summary':r.get('summary','') if 'summary' in cols else '',
         'genres':_clean_genres(r.get('genres','')) if 'genres' in cols else [],
         'actors':_split_people(r.get('actors',''))[:6] if 'actors' in cols else [],
@@ -2379,7 +2690,15 @@ def leaving_soon_settings():
 @app.get('/changelog')
 def changelog():
     versions = [
-        ('v2.9.17', 'Settings & Page Polish: fixed repeated Settings reloads after completed Plex refreshes, stabilised progress/status panels, refreshed static asset caching, added centered mascot-led headers to key pages, and moved Movies/TV Export CSV controls to the far right of the filter bar.'),
+        ('v2.9.18.8', 'My Playlist inside MyCouch: adds a dedicated MyCouch Picks page with movie and TV artwork, details, hover previews, remove controls and a random pick action while keeping Plex as the source of truth.'),
+        ('v2.9.18.7', 'MyCouch Picks navigation: add View My Playlist links to Tonight on MyCouch and successful playlist actions, opening the signed-in Plex user’s own playlist.'),
+        ('v2.9.18.6', 'Playlist API fix: import Flask jsonify so successful MyCouch Picks additions return JSON correctly instead of a false HTTP 500.'),
+        ('v2.9.18.5', 'Playlist confirmation fix: if Plex applies a MyCouch Picks change but returns an error response, MyCouch now verifies the playlist contents before reporting failure.'),
+        ('v2.9.18.4', 'Playlist response polish: Universal Media Preview and shared playlist buttons now handle non-JSON proxy responses safely, preventing a false JSON error after Plex has successfully added the title.'),
+        ('v2.9.18.3', 'MyCouch Picks everywhere: Add to My Playlist is now a shared movie and TV action across title pages, search results and Universal Media Preview hover cards, using the signed-in Plex user’s MyCouch Picks playlist.'),
+        ('v2.9.18.2', 'Tonight on MyCouch polish: compact posters, faster cache-only recommendations, site-consistent movie titles, improved Comfort Watch familiarity ranking, and user-specific Add to My Playlist support through a Plex playlist named MyCouch Picks.'),
+        ('v2.9.18', 'Tonight on MyCouch: adds five local recommendation modes — Quick Watch, Movie Night, Something Different, Comfort Watch and Surprise Me — with three focused movie picks, plain-language reasons, Plex links, Universal Media Preview support and a Nah, try again reshuffle that avoids immediate repeats.'),
+        ('v2.9.17', 'Settings & Page Polish: fixed repeated Settings reloads after completed Plex refreshes, stabilised progress/status panels, refreshed static/PWA caching, and introduced centered mascot-led page headers. Movies and TV Export CSV controls moved to the far-right of their filter bars.'),
         ('v2.9.16', 'Universal Media Preview: larger rich movie and TV preview cards now work across MyCouch wherever a local movie/show detail link appears, including Dashboard shelves, Now Playing, Movies, TV, Smart Search, History, Review Queue and Leaving Soon. Previews are fetched from the local cache on demand and reused in-browser.'),
         ('v2.9.15.2', 'Smart Search intent fix: multi-person searches such as “Ben Affleck and Matt Damon together” now require both people in the same title, while person-plus-role searches such as “Robin Williams in a serious role” combine the actor match with dramatic genre intent instead of matching unrelated words.'),
         ('v2.9.15.1', 'Smart Search people-ranking fix: full actor/director name matches now receive a strong ranking boost, and the People match badge is only shown when the searched person actually matches cached Plex people metadata. Also restores the missing v2.9.15 entry on the visible Changelog page.'),

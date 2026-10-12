@@ -1,0 +1,26 @@
+{% extends 'base.html' %}{% block content %}
+<section class="mc-page-hero mb-3">
+  <img src="/static/mascots/mycouch-logo.png" alt="" aria-hidden="true">
+  <h1>My Playlist</h1>
+  <p>Your MyCouch Picks playlist from Plex, without leaving MyCouch.</p>
+</section>
+{% if error %}<div class="alert alert-danger">Could not load MyCouch Picks: {{error}}</div>{% elif not playlist or not items %}
+<section class="panel text-center py-5"><h3>Nothing saved yet</h3><p class="text-secondary">Use Add to My Playlist anywhere in MyCouch and your picks will appear here.</p><a class="btn btn-outline-info" href="{{url_for('tonight_on_mycouch')}}">Find something for tonight</a></section>
+{% else %}
+<section class="panel">
+  <div class="d-flex align-items-center justify-content-between gap-3 flex-wrap mb-3"><div><h3 class="mb-1">MyCouch Picks</h3><div class="text-secondary">{{items|length}} saved title{{'' if items|length==1 else 's'}}. Plex remains the source of truth.</div></div><button type="button" class="btn btn-outline-info" id="playlistRandom">Pick Something For Me</button></div>
+  <div class="row g-4" id="playlistGrid">
+  {% for x in items %}<div class="col-6 col-md-4 col-xl-3 playlist-item" data-item-id="{{x.item_id}}"><article class="card h-100 playlist-card">
+    <a href="{{'/movie/' if x.kind=='movie' else '/show/'}}{{x.item_id}}" class="playlist-poster-link" data-media-preview data-media-kind="{{x.kind}}" data-media-id="{{x.item_id}}"><img src="{{url_for('smart_search_poster',item_id=x.item_id)}}" class="playlist-poster" loading="lazy" alt="{{x.title}} poster"></a>
+    <div class="card-body d-flex flex-column"><h4 class="mb-1"><a class="title-link" href="{{'/movie/' if x.kind=='movie' else '/show/'}}{{x.item_id}}">{{x.title}}</a></h4>
+      <div class="small text-secondary mb-3">{{'TV Show' if x.kind=='show' else 'Movie'}}{% if x.year %} · {{x.year}}{% endif %}{% if x.runtime_display %} · {{x.runtime_display}}{% endif %}{% if x.rating %} · {{'%.1f'|format(x.rating)}}/10{% endif %}</div>
+      <div class="mt-auto d-flex gap-2 flex-wrap"><a class="btn btn-sm btn-outline-light" href="{{'/movie/' if x.kind=='movie' else '/show/'}}{{x.item_id}}">Details</a>{% if x.plex_url %}<a class="btn btn-sm btn-warning" href="{{x.plex_url}}" target="_blank" rel="noopener">Open in Plex</a>{% endif %}<button class="btn btn-sm btn-outline-danger mc-playlist-remove" type="button" data-remove-id="{{x.item_id}}">Remove</button></div>
+    </div></article></div>{% endfor %}
+  </div>
+</section>
+<script>
+(()=>{const csrf={{csrf_token()|tojson}};
+ document.querySelectorAll('[data-remove-id]').forEach(b=>b.addEventListener('click',async()=>{if(b.disabled)return;const old=b.textContent;b.disabled=true;b.textContent='Removing…';try{const r=await fetch('/api/playlist/remove',{method:'POST',headers:{'Content-Type':'application/json','Accept':'application/json','X-CSRF-Token':csrf},body:JSON.stringify({item_id:Number(b.dataset.removeId)})});const d=await r.json();if(!r.ok||d.ok===false)throw new Error(d.message||'Could not remove title');const item=b.closest('.playlist-item');if(item)item.remove();if(!document.querySelector('.playlist-item'))location.reload();}catch(e){b.disabled=false;b.textContent=old;alert(e.message||'Could not remove from MyCouch Picks');}}));
+ const pick=document.getElementById('playlistRandom');if(pick)pick.addEventListener('click',()=>{const cards=[...document.querySelectorAll('.playlist-item')];if(!cards.length)return;cards.forEach(x=>x.classList.remove('playlist-picked'));const chosen=cards[Math.floor(Math.random()*cards.length)];chosen.classList.add('playlist-picked');chosen.scrollIntoView({behavior:'smooth',block:'center'});});})();
+</script>
+{% endif %}{% endblock %}

@@ -1,6 +1,6 @@
-const CACHE = 'mycouch-static-v2.9.17-export-menu';
+const CACHE = 'mycouch-static-v2.9.18.8-my-playlist';
 const ASSETS = [
-  '/static/app.css?v=2.9.17-settings-page-mascots',
+  '/static/app.css?v=2.9.18.8-my-playlist',
   '/static/mascots/mycouch-logo.png',
   '/static/pwa-192.png',
   '/static/pwa-512.png'

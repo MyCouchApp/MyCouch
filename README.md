@@ -1,6 +1,6 @@
 # 🛋️ MyCouch
 
-**Current release: v2.9.17**
+**Current release: v2.9.18.8**
 
 v2.9.17 focuses on Settings and page polish: Plex cache refresh progress is now stable after an update completes, key pages use centered mascot-led headers, and Movies/TV keep Export CSV at the far right of the library filter bar. It retains the people-aware Smart Search, Universal Media Preview and private-access model introduced across recent releases.
 
@@ -12,8 +12,46 @@ MyCouch is a self-hosted companion for exploring and understanding a Plex media 
 
 > MyCouch is an independent project and is not affiliated with Plex, Tautulli, Radarr, Sonarr, Discord, Emby or Jellyfin.
 
-## Current release — v2.9.17
+## Current release — v2.9.18.8
 
+### v2.9.18.8 — My Playlist inside MyCouch
+
+MyCouch Picks now has a dedicated My Playlist page inside MyCouch. It reads the signed-in user’s real Plex playlist, shows movie and TV artwork with MyCouch details and hover previews, supports removing titles, and includes Pick Something For Me. Playlist actions now stay inside MyCouch.
+
+### v2.9.18.7 — View My Playlist
+
+- Adds **View My Playlist** to Tonight on MyCouch.
+- Successful playlist additions now offer **View My Playlist** immediately.
+- Opens the signed-in Plex user’s own **MyCouch Picks** playlist in Plex.
+
+### v2.9.18.6 — Playlist API response fix
+
+- Fixed the playlist API returning HTTP 500 after Plex had successfully added a title.
+- Added the missing Flask `jsonify` import used by `/api/playlist/add`.
+- Successful additions now return the intended JSON response so shared playlist buttons can show the correct success state.
+
+### v2.9.18.5 — Playlist response fix
+
+- Fixes the false `Unexpected token <` JSON alert that could appear after a hover-card playlist add had actually succeeded.
+- Shared playlist actions now tolerate a successful HTML/proxy response while still reporting genuine HTTP or Plex errors.
+- Keeps the existing **MyCouch Picks** behavior unchanged.
+
+### v2.9.18.2 — Tonight on MyCouch polish
+
+- Uses compact recommendation posters and fast cache-only ranking.
+- Movie titles now use the same MyCouch title styling as the rest of the site.
+- Comfort Watch favours repeat plays and familiar viewing genres rather than simply any previously watched title.
+- Adds **Add to My Playlist**, creating or updating a user-specific Plex playlist named **MyCouch Picks**.
+- Plex user tokens required for playlist actions are retained server-side only and removed when that Plex user signs out. Existing users should sign out/in once after upgrading to enable playlist actions.
+
+### v2.9.18 — Tonight on MyCouch
+
+- Adds a new **Tonight on MyCouch** discovery page with five quick recommendation modes: **Quick Watch**, **Movie Night**, **Something Different**, **Comfort Watch**, and **Surprise Me**.
+- Returns three focused movie choices instead of a long result list.
+- Each pick explains **Why this?** using local Plex metadata, ratings, runtime and viewing signals.
+- **Nah, try again** reshuffles the current mode while avoiding immediate repeats.
+- Recommendation cards link to MyCouch details and Plex and automatically participate in Universal Media Preview.
+- Runs locally from the existing MyCouch/Plex cache with no external AI or recommendation API required.
 
 ### v2.9.17 — Settings & Page Polish
 
@@ -220,3 +258,10 @@ The intended project home is the **MyCouchApp** organisation with the **MyCouch*
 Before any public push, verify the staged files with `git status` and confirm that no databases, tokens, webhooks, backups, logs or personal media paths are included.
 
 The artwork sheet is `static/mycouch-artwork.jpg`; the square GitHub avatar is `static/mycouch-github.png`.
+
+
+### v2.9.18.5
+- Fixed the shared **Add to My Playlist** client response handling so an HTML/proxy response can no longer trigger a false JSON parsing alert after Plex has successfully added the title.
+
+### v2.9.18.3
+MyCouch Picks is now available as a shared movie and TV action across title pages, Smart Search and Universal Media Preview hover cards. Items are added to the signed-in Plex user’s `MyCouch Picks` playlist.
