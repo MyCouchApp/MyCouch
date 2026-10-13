@@ -18,7 +18,7 @@
   <link rel="apple-touch-icon" href="/static/pwa-192.png">
   <link rel="icon" type="image/png" href="/static/pwa-192.png">
   <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
-  <link rel="stylesheet" href="/static/app.css?v=2.9.18.8-my-playlist">
+  <link rel="stylesheet" href="/static/app.css?v=2.9.19-playlists">
 </head>
 <body>
 <div class="mc-shell">
@@ -33,7 +33,7 @@
       <a class="mc-nav-link {% if request.path == '/' %}active{% endif %}" href="/">Dashboard</a>
       <a class="mc-nav-link {% if request.path.startswith('/smart-search') %}active{% endif %}" href="/smart-search">Smart Search</a>
       <a class="mc-nav-link {% if request.path.startswith('/tonight') %}active{% endif %}" href="/tonight">Tonight on MyCouch</a>
-      <a class="mc-nav-link {% if request.path.startswith('/my-playlist') %}active{% endif %}" href="/my-playlist">My Playlist</a>
+      <a class="mc-nav-link {% if request.path.startswith('/my-playlist') %}active{% endif %}" href="/my-playlist">My Playlists</a>
       <a class="mc-nav-link {% if request.path.startswith('/movies') %}active{% endif %}" href="/movies">Movies</a>
       <a class="mc-nav-link {% if request.path.startswith('/tv') %}active{% endif %}" href="/tv">TV Shows</a>
       <a class="mc-nav-link {% if request.path.startswith('/my-history') %}active{% endif %}" href="/my-history">My History</a>
@@ -89,6 +89,8 @@
   </main>
 </div>
 
+
+<div class="modal fade" id="mcPlaylistModal" tabindex="-1" aria-hidden="true"><div class="modal-dialog modal-dialog-centered"><div class="modal-content"><div class="modal-header"><h5 class="modal-title">Add to Playlist</h5><button type="button" class="btn-close" data-bs-dismiss="modal"></button></div><div class="modal-body"><div id="mcPlaylistChoices" class="d-grid gap-2"></div><hr><label class="form-label" for="mcNewPlaylistName">Or create a new Plex playlist</label><div class="input-group"><input class="form-control" id="mcNewPlaylistName" maxlength="120" placeholder="e.g. Unwatched Movies"><button class="btn btn-outline-info" id="mcCreatePlaylist" type="button">Create & Add</button></div><div class="small text-secondary mt-2">The new playlist is created in Plex and remains available in Plex as well as MyCouch.</div></div></div></div></div>
 <div id="mcMediaPreview" class="mc-media-preview" role="dialog" aria-hidden="true"></div>
 
 <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
@@ -147,31 +149,27 @@
   const cache=new Map(); let timer=null,active=null,pinned=false,seq=0;
   const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
   const playlistCsrf={{ csrf_token()|tojson }};
-  async function addPlaylist(itemId,button){
-    const original=button?.textContent||'Add to My Playlist';
-    if(button){button.disabled=true;button.textContent='Adding…';}
+  let playlistPending=null;
+  async function submitPlaylist(itemId,button,payload){
+    const original=button?.textContent||'Add to Playlist'; if(button){button.disabled=true;button.textContent='Adding…';}
     try{
-      const r=await fetch('/api/playlist/add',{method:'POST',headers:{'Content-Type':'application/json','Accept':'application/json','X-CSRF-Token':playlistCsrf},body:JSON.stringify({item_id:Number(itemId)})});
-      // Some proxy/error handlers can replace an otherwise completed response with HTML.
-      // Read defensively so a successful Plex add never becomes a JSON parse alert.
-      const contentType=(r.headers.get('content-type')||'').toLowerCase();
-      const body=await r.text();
-      let d=null;
-      if(contentType.includes('application/json')||body.trim().startsWith('{')){
-        try{d=JSON.parse(body);}catch(_e){d=null;}
-      }
-      if(!r.ok)throw new Error(d?.message||`Could not add to playlist (${r.status})`);
-      if(d&&d.ok===false)throw new Error(d.message||'Could not add to playlist');
-      const message=d?.message||'Added to MyCouch Picks';
-      if(button){
-        button.textContent=message.startsWith('Already')?'Already in MyCouch Picks':'Added to MyCouch Picks';button.classList.add('is-added');
-        const actions=button.closest('.mc-preview-actions,.d-flex,.card-body')||button.parentElement;
-        if(actions&&!actions.querySelector('.mc-view-playlist')){
-          const a=document.createElement('a');a.className='mc-view-playlist btn btn-sm btn-outline-light';a.href=d?.playlist_url||'/my-playlist';a.textContent='View My Playlist';actions.appendChild(a);
-        }
-      }
-    }catch(e){if(button){button.disabled=false;button.textContent=original;} alert(e.message||'Could not add to MyCouch Picks');}
+      const r=await fetch('/api/playlist/add',{method:'POST',headers:{'Content-Type':'application/json','Accept':'application/json','X-CSRF-Token':playlistCsrf},body:JSON.stringify(Object.assign({item_id:Number(itemId)},payload||{}))});
+      const d=await r.json().catch(()=>null); if(!r.ok||d?.ok===false)throw new Error(d?.message||`Could not add to playlist (${r.status})`);
+      if(button){button.textContent=d?.message||'Added';button.classList.add('is-added');button.disabled=false;}
+      bootstrap.Modal.getInstance(document.getElementById('mcPlaylistModal'))?.hide();
+      const actions=button?.closest('.mc-preview-actions,.d-flex,.card-body')||button?.parentElement;
+      if(actions&&!actions.querySelector('.mc-view-playlist')){const x=document.createElement('a');x.className='mc-view-playlist btn btn-sm btn-outline-light';x.href=d?.playlist_url||'/my-playlist';x.textContent='View Playlist';actions.appendChild(x);}
+    }catch(e){if(button){button.disabled=false;button.textContent=original;}alert(e.message||'Could not add to playlist');}
   }
+  async function addPlaylist(itemId,button){
+    playlistPending={itemId:Number(itemId),button}; const choices=document.getElementById('mcPlaylistChoices'); choices.innerHTML='<div class="text-secondary">Loading your Plex playlists…</div>'; document.getElementById('mcNewPlaylistName').value='';
+    const modal=bootstrap.Modal.getOrCreateInstance(document.getElementById('mcPlaylistModal')); modal.show();
+    try{const r=await fetch('/api/playlists',{headers:{'Accept':'application/json'}});const d=await r.json();if(!r.ok||!d.ok)throw new Error(d.message||'Could not load playlists');choices.innerHTML='';
+      if(!d.playlists.length)choices.innerHTML='<div class="text-secondary">No Plex playlists yet. Create your first one below.</div>';
+      d.playlists.forEach(p=>{const b=document.createElement('button');b.type='button';b.className='btn btn-outline-light text-start d-flex justify-content-between';b.innerHTML=`<span>${esc(p.title)}</span><span class="text-secondary">${Number(p.leaf_count||0)} items</span>`;b.onclick=()=>submitPlaylist(itemId,button,{playlist_id:p.id});choices.appendChild(b);});
+    }catch(e){choices.innerHTML=`<div class="alert alert-danger mb-0">${esc(e.message)}</div>`;}
+  }
+  document.getElementById('mcCreatePlaylist')?.addEventListener('click',()=>{if(!playlistPending)return;const name=document.getElementById('mcNewPlaylistName').value.trim();if(!name)return alert('Enter a playlist name.');submitPlaylist(playlistPending.itemId,playlistPending.button,{new_title:name});});
   window.mcAddToPlaylist=addPlaylist;
   function mediaTarget(node){
     const el=node?.closest?.('[data-media-preview],a[href^="/movie/"],a[href^="/show/"]'); if(!el)return null;
@@ -185,7 +183,7 @@
     const progress=d.kind==='show'?`<div class="mc-preview-progress"><span style="width:${Math.max(0,Math.min(100,Number(d.progress)||0))}%"></span></div><div class="mc-preview-small">${d.watched_episodes||0} / ${d.episodes||0} episodes watched${d.seasons?' · '+d.seasons+' seasons':''}</div>`:'';
     const people=[d.directors?.length?`<div><b>Director${d.directors.length>1?'s':''}</b> ${esc(d.directors.join(' · '))}</div>`:'',d.actors?.length?`<div><b>Cast</b> ${esc(d.actors.join(' · '))}</div>`:''].join('');
     const activity=d.plays?`<span>Watched ${d.plays} time${d.plays===1?'':'s'}${d.last_watched?' · Last '+esc(dateText(d.last_watched)):''}</span>`:'<span>No recorded Tautulli plays</span>';
-    card.innerHTML=`<div class="mc-preview-layout"><div class="mc-preview-poster"><img src="${esc(d.poster_url)}" alt="" onerror="this.style.display='none'"></div><div class="mc-preview-copy"><div class="mc-preview-type">${d.kind==='movie'?'Movie':'TV Show'}</div><h3>${esc(d.title)}</h3><div class="mc-preview-meta">${meta}</div>${d.genres?.length?`<div class="mc-preview-genres">${d.genres.map(x=>`<span>${esc(x)}</span>`).join('')}</div>`:''}${people?`<div class="mc-preview-people">${people}</div>`:''}${d.summary?`<p>${esc(d.summary)}</p>`:''}${progress}<div class="mc-preview-activity">${activity}</div><div class="mc-preview-actions"><a href="${esc(d.details_url)}">View details</a>${d.plex_url?`<a href="${esc(d.plex_url)}" target="_blank" rel="noopener">Open in Plex</a>`:''}<button type="button" class="mc-playlist-btn" data-playlist-id="${Number(d.item_id||d.id||0)}">Add to My Playlist</button></div></div></div>`;
+    card.innerHTML=`<div class="mc-preview-layout"><div class="mc-preview-poster"><img src="${esc(d.poster_url)}" alt="" onerror="this.style.display='none'"></div><div class="mc-preview-copy"><div class="mc-preview-type">${d.kind==='movie'?'Movie':'TV Show'}</div><h3>${esc(d.title)}</h3><div class="mc-preview-meta">${meta}</div>${d.genres?.length?`<div class="mc-preview-genres">${d.genres.map(x=>`<span>${esc(x)}</span>`).join('')}</div>`:''}${people?`<div class="mc-preview-people">${people}</div>`:''}${d.summary?`<p>${esc(d.summary)}</p>`:''}${progress}<div class="mc-preview-activity">${activity}</div><div class="mc-preview-actions"><a href="${esc(d.details_url)}">View details</a>${d.plex_url?`<a href="${esc(d.plex_url)}" target="_blank" rel="noopener">Open in Plex</a>`:''}<button type="button" class="mc-playlist-btn" data-playlist-id="${Number(d.item_id||d.id||0)}">Add to Playlist</button></div></div></div>`;
   }
   card.addEventListener('click',e=>{const b=e.target.closest('[data-playlist-id]');if(b){e.preventDefault();e.stopPropagation();addPlaylist(b.dataset.playlistId,b);}});
   function position(el){const r=el.getBoundingClientRect(),gap=14,w=Math.min(540,innerWidth-24),h=card.offsetHeight||420;let left=r.left+r.width/2-w/2;left=Math.max(12,Math.min(innerWidth-w-12,left));let top=r.bottom+gap;if(top+h>innerHeight-12)top=Math.max(12,r.top-h-gap);card.style.width=w+'px';card.style.left=left+'px';card.style.top=top+'px';}

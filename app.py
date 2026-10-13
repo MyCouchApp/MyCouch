@@ -21,7 +21,7 @@ def _app_secret():
 app=Flask(__name__); app.secret_key=_app_secret()
 app.config.update(SESSION_COOKIE_HTTPONLY=True,SESSION_COOKIE_SAMESITE='Lax',SESSION_COOKIE_SECURE=(os.environ.get('MYCOUCH_SECURE_COOKIE') or os.environ.get('PLA_SECURE_COOKIE','0'))=='1',PERMANENT_SESSION_LIFETIME=timedelta(days=30))
 BUILD_LOCK=threading.Lock()
-APP_VERSION='2.9.18.8'
+APP_VERSION='2.9.19.1'
 PLEX_UPDATE_STATUS={'running':False,'last_update':None,'error':None}
 SMART_LOCK=threading.Lock(); SMART_MODEL=None; SMART_VECTORS=None; SMART_IDS=None
 BUILD_STATUS={'running':False,'stage':'Idle','percent':0,'current':0,'total':0,'message':'','started_at':None,'elapsed':0,'error':None,'complete':False}
@@ -65,6 +65,10 @@ def config():
     c.execute('create table if not exists mobile_auth_codes(code text primary key,profile_json text not null,expires_at integer not null)')
     # Plex user tokens are kept server-side only so user-specific Plex actions (such as playlists) never expose tokens to the browser.
     c.execute('create table if not exists plex_user_tokens(owner_key text primary key,token text not null,updated_at integer not null)')
+    c.execute("create table if not exists smart_playlists(id integer primary key autoincrement,owner_key text not null,name text not null,media_type text not null default 'movie',rule text not null,created_at integer not null)")
+    smart_cols={r[1] for r in c.execute('pragma table_info(smart_playlists)').fetchall()}
+    for col,ddl in [('query','text'),('plex_playlist_id','text'),('sync_enabled','integer not null default 0'),('last_synced','integer'),('last_sync_error','text')]:
+        if col not in smart_cols: c.execute(f'alter table smart_playlists add column {col} {ddl}')
     c.execute('create table if not exists security_events(id integer primary key autoincrement,event_type text not null,ip text,path text,method text,user_agent text,detail text,created_at integer not null)')
     c.execute('create index if not exists idx_security_events_created on security_events(created_at desc)')
 
@@ -206,7 +210,7 @@ app.jinja_env.filters['timestamp_date']=lambda v: datetime.fromtimestamp(int(v))
 app.jinja_env.filters['timestamp_datetime']=lambda v: datetime.fromtimestamp(int(v)).strftime('%d %b %Y %H:%M:%S') if v else '—'
 
 # Endpoints that expose library/history data require a verified Plex account.
-PLEX_ENDPOINTS={'dashboard','movie_page','tv_page','movie_detail','show_detail','smart_search','tonight_on_mycouch','tonight_playlist_add','my_playlist','playlist_add_api','playlist_remove_api','smart_search_history_clear','smart_search_poster','now_playing_api','media_preview_api','cleanup','my_history','changelog'}
+PLEX_ENDPOINTS={'dashboard','movie_page','tv_page','movie_detail','show_detail','smart_search','tonight_on_mycouch','tonight_playlist_add','my_playlist','playlist_add_api','playlist_remove_api','playlist_list_api','smart_playlist_create_api','smart_search_history_clear','smart_search_poster','now_playing_api','media_preview_api','cleanup','my_history','changelog'}
 # These are reachable before Plex authorization. Dashboard renders only the landing page while signed out.
 ANON_ENDPOINTS={'dashboard','setup_admin','login','logout','static','service_worker','robots_txt','plex_signin','plex_callback','plex_mobile_callback','plex_mobile_finalize','plex_logout'}
 
@@ -1365,7 +1369,10 @@ def refresh_cache():
 
 def refresh_worker():
     if not BUILD_LOCK.acquire(blocking=False): return
-    try: refresh_cache()
+    try:
+        refresh_cache()
+        try: _sync_all_smart_playlists()
+        except Exception as e: print('Smart playlist sync after cache refresh failed:',e)
     finally: BUILD_LOCK.release()
 
 def qcache(sql,args=()):
@@ -1821,171 +1828,242 @@ def _plex_playlist_container(data):
     if not isinstance(data,dict): return []
     return ((data.get('MediaContainer') or {}).get('Metadata') or [])
 
-def _mycouch_playlist_web_url():
-    """Return the signed-in Plex user's MyCouch Picks URL, if it exists."""
+def _plex_user_playlists():
     token=_plex_user_token()
-    if not token:
-        raise RuntimeError('Sign out of Plex and sign back in once to open your personal MyCouch Picks playlist.')
+    if not token: raise RuntimeError('Sign out of Plex and sign back in once to use your personal playlists.')
     base=setting('plex_url','http://localhost:32400').rstrip('/')
-    machine=setting('plex_machine_id','').strip()
-    if not machine: raise RuntimeError('Plex server identity is not configured.')
     headers={'X-Plex-Token':token,'Accept':'application/json'}
-    playlists=requests.get(base+'/playlists',headers=headers,params={'playlistType':'video'},timeout=12)
-    playlists.raise_for_status()
-    for row in _plex_playlist_container(playlists.json()):
-        if (row.get('title') or '').strip().lower()=='mycouch picks':
-            playlist_id=row.get('ratingKey') or row.get('key','').strip('/').split('/')[-1]
-            if playlist_id:
-                key=urllib.parse.quote('/playlists/'+str(playlist_id),safe='')
-                return f"https://app.plex.tv/desktop/#!/server/{machine}/details?key={key}"
-    return None
+    r=requests.get(base+'/playlists',headers=headers,params={'playlistType':'video'},timeout=12); r.raise_for_status()
+    out=[]
+    for row in _plex_playlist_container(r.json()):
+        pid=row.get('ratingKey') or row.get('key','').strip('/').split('/')[-1]
+        if pid: out.append({'id':str(pid),'title':row.get('title') or 'Untitled Playlist','leaf_count':row.get('leafCount') or 0,'smart':bool(row.get('smart'))})
+    return out
 
-def _mycouch_playlist_data():
-    """Return the signed-in user's MyCouch Picks playlist and its Plex items."""
-    token=_plex_user_token()
-    if not token:
-        raise RuntimeError('Sign out of Plex and sign back in once to use your personal MyCouch Picks playlist.')
-    base=setting('plex_url','http://localhost:32400').rstrip('/')
-    headers={'X-Plex-Token':token,'Accept':'application/json'}
-    playlists=requests.get(base+'/playlists',headers=headers,params={'playlistType':'video'},timeout=12)
-    playlists.raise_for_status()
-    playlist=None
-    for row in _plex_playlist_container(playlists.json()):
-        if (row.get('title') or '').strip().lower()=='mycouch picks':
-            playlist=row; break
-    if not playlist: return None,[]
-    playlist_id=playlist.get('ratingKey') or playlist.get('key','').strip('/').split('/')[-1]
-    if not playlist_id: raise RuntimeError('Plex returned an invalid playlist identifier.')
-    detail=requests.get(f'{base}/playlists/{playlist_id}/items',headers=headers,timeout=12)
-    detail.raise_for_status()
-    return dict(playlist,playlist_id=str(playlist_id)),_plex_playlist_container(detail.json())
+def _playlist_data(playlist_id):
+    playlists=_plex_user_playlists(); playlist=next((x for x in playlists if str(x['id'])==str(playlist_id)),None)
+    if not playlist: raise RuntimeError('That Plex playlist is not available to this user.')
+    token=_plex_user_token(); base=setting('plex_url','http://localhost:32400').rstrip('/'); headers={'X-Plex-Token':token,'Accept':'application/json'}
+    detail=requests.get(f'{base}/playlists/{playlist_id}/items',headers=headers,timeout=12); detail.raise_for_status()
+    return playlist,_plex_playlist_container(detail.json())
+
+def _playlist_items_for_ui(plex_items):
+    items=[]
+    for row in plex_items:
+        item_id=int(row.get('ratingKey') or 0); rtype=(row.get('type') or '').lower(); kind='show' if rtype=='show' else 'movie'
+        cached=qcache('select * from shows where show_id=? limit 1',(item_id,)) if kind=='show' else qcache('select * from movies where metadata_id=? limit 1',(item_id,))
+        c=cached[0] if cached else {}; duration=c.get('duration') if kind=='movie' else None
+        mins=(round(duration/60000) if duration and duration>10000 else round(duration/60)) if duration else None
+        items.append({'item_id':item_id,'kind':kind,'title':c.get('title') or row.get('title') or 'Unknown title','year':c.get('year') or row.get('year'),'rating':c.get('rating') if c else row.get('rating'),'genres':_clean_genres(c.get('genres','')) if c else [],'runtime_display':_runtime_display(mins) if mins else '','playlist_item_id':row.get('playlistItemID') or row.get('playlistItemId'),'plex_url':_plex_web_link(item_id) if item_id else None})
+    return items
+
+def _smart_playlist_rows(media_type,rule,query=None):
+    if query:
+        return [{'item_id':r['metadata_id'],'kind':'movie','title':r['title'],'year':r.get('year'),'rating':r.get('rating'),'runtime_display':r.get('runtime_display') or '','plex_url':r.get('plex_url')} for r in _lexical_smart_search(query,limit=250,strict=True)]
+    if not cache_ready(): return []
+    media_type='show' if media_type=='show' else 'movie'
+    if media_type=='movie':
+        sql='select * from movies'; where=[]; args=[]
+        if rule=='unwatched': where.append('coalesce(watched,0)=0')
+        elif rule=='new30': where.append('added_at>=?'); args.append(int(time.time())-30*86400)
+        elif rule=='rated-unwatched': where.extend(['coalesce(watched,0)=0','coalesce(rating,0)>=7.5'])
+        elif rule=='recent': where.append('added_at>=?'); args.append(int(time.time())-90*86400)
+        if where: sql+=' where '+' and '.join(where)
+        sql+=' order by added_at desc limit 250'
+        rows=qcache(sql,tuple(args)); out=[]
+        for c in rows:
+            dur=c.get('duration'); mins=(round(dur/60000) if dur and dur>10000 else round(dur/60)) if dur else None
+            out.append({'item_id':c['metadata_id'],'kind':'movie','title':c['title'],'year':c.get('year'),'rating':c.get('rating'),'runtime_display':_runtime_display(mins) if mins else '','plex_url':_plex_web_link(c['metadata_id'])})
+        return out
+    sql='select * from shows'; where=[]; args=[]
+    if rule=='unwatched': where.append('coalesce(watched_episodes,0)=0')
+    elif rule=='new30': where.append('added_at>=?'); args.append(int(time.time())-30*86400)
+    elif rule=='rated-unwatched': where.extend(['coalesce(watched_episodes,0)=0','coalesce(rating,0)>=7.5'])
+    elif rule=='recent': where.append('added_at>=?'); args.append(int(time.time())-90*86400)
+    if where: sql+=' where '+' and '.join(where)
+    sql+=' order by added_at desc limit 250'
+    return [{'item_id':c['show_id'],'kind':'show','title':c['title'],'year':c.get('year'),'rating':c.get('rating'),'runtime_display':'','plex_url':_plex_web_link(c['show_id'])} for c in qcache(sql,tuple(args))]
+
+def _user_smart_playlists():
+    owner=_smart_search_owner_key(); c=config(); rows=c.execute('select id,name,media_type,rule,query,plex_playlist_id,sync_enabled,last_synced,last_sync_error from smart_playlists where owner_key=? order by name collate nocase',(owner,)).fetchall(); c.close()
+    return [dict(x) for x in rows]
+
+def _plex_playlists_with_token(token):
+    base=setting('plex_url','http://localhost:32400').rstrip('/'); headers={'X-Plex-Token':token,'Accept':'application/json'}
+    r=requests.get(base+'/playlists',headers=headers,params={'playlistType':'video'},timeout=12); r.raise_for_status()
+    out=[]
+    for row in _plex_playlist_container(r.json()):
+        pid=row.get('ratingKey') or row.get('key','').strip('/').split('/')[-1]
+        if pid: out.append({'id':str(pid),'title':row.get('title') or 'Untitled Playlist'})
+    return out
+
+def _sync_smart_playlist_row(row,token=None):
+    row=dict(row); token=token or _plex_user_token()
+    if not token: raise RuntimeError('Plex sign-in token is not available. Sign out of Plex and sign back in once.')
+    desired=_smart_playlist_rows(row['media_type'],row['rule'],row.get('query'))
+    desired_ids=[int(x['item_id']) for x in desired if x.get('item_id')]
+    if not desired_ids and not row.get('plex_playlist_id'):
+        raise RuntimeError('This Smart List has no matching titles yet, so Plex cannot create its playlist.')
+    base=setting('plex_url','http://localhost:32400').rstrip('/'); machine=setting('plex_machine_id','').strip()
+    if not machine: raise RuntimeError('Plex server identity is not configured.')
+    headers={'X-Plex-Token':token,'Accept':'application/json'}; pid=str(row.get('plex_playlist_id') or '')
+    playlists=_plex_playlists_with_token(token)
+    existing=next((p for p in playlists if str(p['id'])==pid),None) if pid else None
+    if not existing:
+        existing=next((p for p in playlists if p['title'].strip().lower()==row['name'].strip().lower()),None)
+    if existing: pid=str(existing['id'])
+    else:
+        first=desired_ids[0]; uri=f'server://{machine}/com.plexapp.plugins.library/library/metadata/{first}'
+        r=requests.post(base+'/playlists',headers=headers,params={'type':'video','title':row['name'][:120],'smart':'0','uri':uri},timeout=12); r.raise_for_status()
+        playlists=_plex_playlists_with_token(token); made=next((p for p in playlists if p['title'].strip().lower()==row['name'].strip().lower()),None)
+        if not made: raise RuntimeError('Plex created the playlist but MyCouch could not find it afterwards.')
+        pid=str(made['id'])
+    detail=requests.get(f'{base}/playlists/{pid}/items',headers=headers,timeout=12); detail.raise_for_status(); current=_plex_playlist_container(detail.json())
+    current_ids={int(x.get('ratingKey') or 0) for x in current if x.get('ratingKey')}
+    desired_set=set(desired_ids)
+    for item_id in desired_ids:
+        if item_id in current_ids: continue
+        uri=f'server://{machine}/com.plexapp.plugins.library/library/metadata/{item_id}'
+        r=requests.put(f'{base}/playlists/{pid}/items',headers=headers,params={'uri':uri},timeout=12); r.raise_for_status()
+    for item in current:
+        iid=int(item.get('ratingKey') or 0)
+        if iid and iid not in desired_set:
+            pli=item.get('playlistItemID') or item.get('playlistItemId')
+            if pli:
+                r=requests.delete(f'{base}/playlists/{pid}/items/{pli}',headers=headers,timeout=12); r.raise_for_status()
+    now=int(time.time()); c=config(); c.execute('update smart_playlists set plex_playlist_id=?,sync_enabled=1,last_synced=?,last_sync_error=null where id=?',(pid,now,row['id'])); c.commit(); c.close()
+    return pid,len(desired_ids)
+
+def _sync_all_smart_playlists():
+    c=config(); rows=c.execute("select sp.*,put.token from smart_playlists sp left join plex_user_tokens put on put.owner_key=sp.owner_key where coalesce(sp.sync_enabled,0)=1").fetchall(); c.close()
+    for row in rows:
+        try: _sync_smart_playlist_row(row,row['token'])
+        except Exception as e:
+            c=config(); c.execute('update smart_playlists set last_sync_error=? where id=?',(str(e)[:500],row['id'])); c.commit(); c.close()
 
 @app.get('/my-playlist')
 def my_playlist():
     try:
-        playlist,plex_items=_mycouch_playlist_data()
-        items=[]
-        for row in plex_items:
-            item_id=int(row.get('ratingKey') or 0)
-            kind='show' if (row.get('type') or '').lower()=='show' else 'movie'
-            cached=[]
-            if item_id:
-                cached=qcache('select * from shows where show_id=? limit 1',(item_id,)) if kind=='show' else qcache('select * from movies where metadata_id=? limit 1',(item_id,))
-            c=cached[0] if cached else {}
-            duration=c.get('duration') if kind=='movie' else None
-            mins=(round(duration/60000) if duration and duration>10000 else round(duration/60)) if duration else None
-            items.append({
-                'item_id':item_id,'kind':kind,'title':c.get('title') or row.get('title') or 'Unknown title',
-                'year':c.get('year') or row.get('year'),'rating':c.get('rating') if c else row.get('rating'),
-                'genres':_clean_genres(c.get('genres','')) if c else [],'runtime_display':_runtime_display(mins) if mins else '',
-                'playlist_item_id':row.get('playlistItemID') or row.get('playlistItemId'),'plex_url':_plex_web_link(item_id) if item_id else None
-            })
-        return render_template('my_playlist.html',playlist=playlist,items=items,error=None)
+        playlists=_plex_user_playlists(); smart_lists=_user_smart_playlists(); selected=None; items=[]; is_smart=False
+        smart_id=request.args.get('smart',type=int); playlist_id=(request.args.get('playlist') or '').strip()
+        if smart_id:
+            selected=next((x for x in smart_lists if int(x['id'])==smart_id),None)
+            if selected: items=_smart_playlist_rows(selected['media_type'],selected['rule'],selected.get('query')); is_smart=True
+        elif playlist_id:
+            selected,raw=_playlist_data(playlist_id); items=_playlist_items_for_ui(raw)
+        elif playlists:
+            selected,raw=_playlist_data(playlists[0]['id']); items=_playlist_items_for_ui(raw)
+        return render_template('my_playlist.html',playlists=playlists,smart_lists=smart_lists,playlist=selected,items=items,is_smart=is_smart,error=None)
     except Exception as e:
-        return render_template('my_playlist.html',playlist=None,items=[],error=str(e))
+        return render_template('my_playlist.html',playlists=[],smart_lists=_user_smart_playlists(),playlist=None,items=[],is_smart=False,error=str(e))
 
 @app.get('/playlist/mycouch-picks')
 def mycouch_playlist_open():
-    # Kept for old bookmarks/buttons; the playlist now lives inside MyCouch.
-    return redirect(url_for('my_playlist'))
-
-@app.post('/api/playlist/remove')
-def playlist_remove_api():
     try:
-        data=request.get_json(silent=True) or {}
-        item_id=int(data.get('item_id') or 0)
-        if item_id<=0: raise RuntimeError('Invalid Plex item.')
-        playlist,items=_mycouch_playlist_data()
-        if not playlist: return jsonify({'ok':True,'message':'MyCouch Picks is already empty.'})
-        match=next((r for r in items if str(r.get('ratingKey') or '')==str(item_id)),None)
-        if not match: return jsonify({'ok':True,'message':'Already removed from MyCouch Picks.'})
-        playlist_item_id=match.get('playlistItemID') or match.get('playlistItemId')
-        if not playlist_item_id: raise RuntimeError('Plex did not return a playlist item identifier.')
-        token=_plex_user_token(); base=setting('plex_url','http://localhost:32400').rstrip('/')
-        headers={'X-Plex-Token':token,'Accept':'application/json'}
-        removed=requests.delete(f"{base}/playlists/{playlist['playlist_id']}/items/{playlist_item_id}",headers=headers,timeout=12)
-        if not removed.ok:
-            # Plex can mutate successfully despite a poor response; verify before failing.
-            _p,verify=_mycouch_playlist_data()
-            if any(str(r.get('ratingKey') or '')==str(item_id) for r in verify): removed.raise_for_status()
-        return jsonify({'ok':True,'message':'Removed from MyCouch Picks.'})
-    except Exception as e:
-        return jsonify({'ok':False,'message':'Could not remove from Plex playlist: '+str(e)}),400
+        p=next((x for x in _plex_user_playlists() if x['title'].strip().lower()=='mycouch picks'),None)
+        return redirect(url_for('my_playlist',playlist=p['id']) if p else url_for('my_playlist'))
+    except Exception: return redirect(url_for('my_playlist'))
 
-def _add_to_mycouch_playlist(item_id):
+@app.get('/api/playlists')
+def playlist_list_api():
+    try: return jsonify({'ok':True,'playlists':_plex_user_playlists()})
+    except Exception as e: return jsonify({'ok':False,'message':str(e),'playlists':[]}),400
+
+def _add_to_playlist(item_id,playlist_id=None,new_title=None):
     token=_plex_user_token()
-    if not token:
-        raise RuntimeError('Sign out of Plex and sign back in once to enable your personal MyCouch Picks playlist.')
-    base=setting('plex_url','http://localhost:32400').rstrip('/')
-    machine=setting('plex_machine_id','').strip()
+    if not token: raise RuntimeError('Sign out of Plex and sign back in once to enable personal Plex playlists.')
+    base=setting('plex_url','http://localhost:32400').rstrip('/'); machine=setting('plex_machine_id','').strip()
     if not machine: raise RuntimeError('Plex server identity is not configured.')
     headers={'X-Plex-Token':token,'Accept':'application/json'}
-    # Confirm this user can resolve the item before changing their playlist.
     check=requests.get(f'{base}/library/metadata/{int(item_id)}',headers=headers,timeout=12)
-    if not check.ok: raise RuntimeError('Plex could not open this movie for the signed-in user.')
-    playlists=requests.get(base+'/playlists',headers=headers,params={'playlistType':'video'},timeout=12)
-    playlists.raise_for_status()
-    existing=None
-    for row in _plex_playlist_container(playlists.json()):
-        if (row.get('title') or '').strip().lower()=='mycouch picks': existing=row; break
+    if not check.ok: raise RuntimeError('Plex could not open this title for the signed-in user.')
     uri=f'server://{machine}/com.plexapp.plugins.library/library/metadata/{int(item_id)}'
+    playlists=_plex_user_playlists(); existing=None
+    if playlist_id: existing=next((x for x in playlists if str(x['id'])==str(playlist_id)),None)
+    elif new_title:
+        existing=next((x for x in playlists if x['title'].strip().lower()==new_title.strip().lower()),None)
+    else:
+        existing=next((x for x in playlists if x['title'].strip().lower()=='mycouch picks'),None); new_title='MyCouch Picks'
     if existing:
-        playlist_id=existing.get('ratingKey') or existing.get('key','').strip('/').split('/')[-1]
-        if not playlist_id: raise RuntimeError('Plex returned an invalid playlist identifier.')
-        # Avoid duplicates where Plex exposes playlist children.
-        detail=requests.get(f'{base}/playlists/{playlist_id}/items',headers=headers,timeout=12)
-        if detail.ok:
-            for row in _plex_playlist_container(detail.json()):
-                if str(row.get('ratingKey') or '')==str(item_id):
-                    return 'Already in MyCouch Picks'
-        added=requests.put(f'{base}/playlists/{playlist_id}/items',headers=headers,params={'uri':uri},timeout=12)
+        pid=existing['id']; detail=requests.get(f'{base}/playlists/{pid}/items',headers=headers,timeout=12)
+        if detail.ok and any(str(r.get('ratingKey') or '')==str(item_id) for r in _plex_playlist_container(detail.json())):
+            return f"Already in {existing['title']}",pid,existing['title']
+        added=requests.put(f'{base}/playlists/{pid}/items',headers=headers,params={'uri':uri},timeout=12)
         if not added.ok:
-            # Plex can occasionally apply the playlist mutation but still return an error.
-            # Verify the resulting playlist before reporting failure to the browser.
-            verify=requests.get(f'{base}/playlists/{playlist_id}/items',headers=headers,timeout=12)
-            if verify.ok:
-                for row in _plex_playlist_container(verify.json()):
-                    if str(row.get('ratingKey') or '')==str(item_id):
-                        return 'Added to MyCouch Picks'
-            added.raise_for_status()
-        return 'Added to MyCouch Picks'
-    created=requests.post(base+'/playlists',headers=headers,params={'type':'video','title':'MyCouch Picks','smart':'0','uri':uri},timeout=12)
-    if not created.ok:
-        # As above, verify whether Plex created the playlist/item despite its response.
-        verify_lists=requests.get(base+'/playlists',headers=headers,params={'playlistType':'video'},timeout=12)
-        if verify_lists.ok:
-            for playlist in _plex_playlist_container(verify_lists.json()):
-                if (playlist.get('title') or '').strip().lower()!='mycouch picks':
-                    continue
-                verify_id=playlist.get('ratingKey') or playlist.get('key','').strip('/').split('/')[-1]
-                if not verify_id:
-                    continue
-                verify=requests.get(f'{base}/playlists/{verify_id}/items',headers=headers,timeout=12)
-                if verify.ok and any(str(row.get('ratingKey') or '')==str(item_id) for row in _plex_playlist_container(verify.json())):
-                    return 'Added to new MyCouch Picks playlist'
-        created.raise_for_status()
-    return 'Added to new MyCouch Picks playlist'
+            verify=requests.get(f'{base}/playlists/{pid}/items',headers=headers,timeout=12)
+            if not (verify.ok and any(str(r.get('ratingKey') or '')==str(item_id) for r in _plex_playlist_container(verify.json()))): added.raise_for_status()
+        return f"Added to {existing['title']}",pid,existing['title']
+    title=(new_title or 'MyCouch Picks').strip()[:120]
+    if not title: raise RuntimeError('Enter a playlist name.')
+    created=requests.post(base+'/playlists',headers=headers,params={'type':'video','title':title,'smart':'0','uri':uri},timeout=12)
+    if not created.ok: created.raise_for_status()
+    refreshed=_plex_user_playlists(); made=next((x for x in refreshed if x['title'].strip().lower()==title.lower()),None)
+    return f'Added to new {title} playlist',(made or {}).get('id'),title
 
 @app.post('/api/playlist/add')
 def playlist_add_api():
     try:
-        data=request.get_json(silent=True) or {}
-        item_id=int(data.get('item_id') or request.form.get('item_id') or 0)
+        data=request.get_json(silent=True) or {}; item_id=int(data.get('item_id') or request.form.get('item_id') or 0)
         if item_id<=0: raise RuntimeError('Invalid Plex item.')
-        message=_add_to_mycouch_playlist(item_id)
-        return jsonify({'ok':True,'message':message,'playlist_url':url_for('my_playlist')})
-    except Exception as e:
-        return jsonify({'ok':False,'message':'Could not add to Plex playlist: '+str(e)}),400
+        message,pid,title=_add_to_playlist(item_id,data.get('playlist_id'),(data.get('new_title') or '').strip() or None)
+        return jsonify({'ok':True,'message':message,'playlist_id':pid,'playlist_title':title,'playlist_url':url_for('my_playlist',playlist=pid) if pid else url_for('my_playlist')})
+    except Exception as e: return jsonify({'ok':False,'message':'Could not add to Plex playlist: '+str(e)}),400
+
+@app.post('/api/playlist/remove')
+def playlist_remove_api():
+    try:
+        data=request.get_json(silent=True) or {}; item_id=int(data.get('item_id') or 0); playlist_id=str(data.get('playlist_id') or '')
+        if item_id<=0 or not playlist_id: raise RuntimeError('Invalid playlist item.')
+        playlist,items=_playlist_data(playlist_id); match=next((r for r in items if str(r.get('ratingKey') or '')==str(item_id)),None)
+        if not match: return jsonify({'ok':True,'message':f"Already removed from {playlist['title']}."})
+        playlist_item_id=match.get('playlistItemID') or match.get('playlistItemId')
+        if not playlist_item_id: raise RuntimeError('Plex did not return a playlist item identifier.')
+        token=_plex_user_token(); base=setting('plex_url','http://localhost:32400').rstrip('/'); headers={'X-Plex-Token':token,'Accept':'application/json'}
+        removed=requests.delete(f'{base}/playlists/{playlist_id}/items/{playlist_item_id}',headers=headers,timeout=12)
+        if not removed.ok:
+            _p,verify=_playlist_data(playlist_id)
+            if any(str(r.get('ratingKey') or '')==str(item_id) for r in verify): removed.raise_for_status()
+        return jsonify({'ok':True,'message':f"Removed from {playlist['title']}."})
+    except Exception as e: return jsonify({'ok':False,'message':'Could not remove from Plex playlist: '+str(e)}),400
+
+@app.post('/api/smart-playlists')
+def smart_playlist_create_api():
+    try:
+        data=request.get_json(silent=True) or {}; name=(data.get('name') or '').strip()[:120]; query=(data.get('query') or '').strip()[:500] or None
+        media_type=data.get('media_type') or 'movie'; rule=data.get('rule') or ('search' if query else 'unwatched'); sync=bool(data.get('sync'))
+        if not name: raise RuntimeError('Enter a smart list name.')
+        if query: media_type='movie'; rule='search'
+        elif media_type not in ('movie','show') or rule not in ('unwatched','new30','rated-unwatched','recent'): raise RuntimeError('Invalid smart list rule.')
+        c=config(); c.execute('insert into smart_playlists(owner_key,name,media_type,rule,query,created_at) values(?,?,?,?,?,?)',(_smart_search_owner_key(),name,media_type,rule,query,int(time.time()))); sid=c.execute('select last_insert_rowid()').fetchone()[0]; c.commit(); row=c.execute('select * from smart_playlists where id=?',(sid,)).fetchone(); c.close()
+        message='Smart List created.'
+        if sync:
+            pid,count=_sync_smart_playlist_row(row); message=f'Smart List created and synced {count} titles to Plex.'
+        return jsonify({'ok':True,'id':sid,'message':message,'url':url_for('my_playlist',smart=sid)})
+    except Exception as e: return jsonify({'ok':False,'message':str(e)}),400
+
+@app.post('/api/smart-playlists/<int:smart_id>/sync')
+def smart_playlist_sync_api(smart_id):
+    try:
+        owner=_smart_search_owner_key(); c=config(); row=c.execute('select * from smart_playlists where id=? and owner_key=?',(smart_id,owner)).fetchone(); c.close()
+        if not row: raise RuntimeError('Smart List not found.')
+        pid,count=_sync_smart_playlist_row(row)
+        return jsonify({'ok':True,'message':f'Synced {count} titles to Plex.','playlist_id':pid})
+    except Exception as e: return jsonify({'ok':False,'message':str(e)}),400
+
+@app.post('/api/smart-playlists/<int:smart_id>/stop-sync')
+def smart_playlist_stop_sync_api(smart_id):
+    try:
+        owner=_smart_search_owner_key(); c=config(); c.execute('update smart_playlists set sync_enabled=0 where id=? and owner_key=?',(smart_id,owner)); c.commit(); c.close()
+        return jsonify({'ok':True,'message':'Automatic Plex sync stopped. The Plex playlist has been left in place.'})
+    except Exception as e: return jsonify({'ok':False,'message':str(e)}),400
 
 @app.post('/tonight/playlist/add')
 def tonight_playlist_add():
     try:
         item_id=int(request.form.get('item_id') or 0)
         if item_id<=0: raise RuntimeError('Invalid movie.')
-        message=_add_to_mycouch_playlist(item_id)
-        flash(message,'success')
-    except Exception as e:
-        flash('Could not add to Plex playlist: '+str(e),'danger')
+        _add_to_playlist(item_id,new_title='MyCouch Picks'); flash('Added to MyCouch Picks','success')
+    except Exception as e: flash('Could not add to Plex playlist: '+str(e),'danger')
     mode=(request.form.get('mode') or '').strip().lower()
     return redirect(url_for('tonight_on_mycouch',mode=mode if mode in TONIGHT_MODES else 'surprise'))
 
@@ -2690,6 +2768,8 @@ def leaving_soon_settings():
 @app.get('/changelog')
 def changelog():
     versions = [
+        ('v2.9.19.1', 'Smart Search can now create named Smart Playlists and optionally sync them to Plex. Synced Smart Lists automatically reconcile after Plex cache refreshes, with Sync Now and Stop Syncing controls.'),
+        ('v2.9.19', 'My Playlists: discovers all Plex video playlists for the signed-in user, lets titles be added to an existing or newly named playlist, and adds personal Smart Lists built from the local MyCouch cache.'),
         ('v2.9.18.8', 'My Playlist inside MyCouch: adds a dedicated MyCouch Picks page with movie and TV artwork, details, hover previews, remove controls and a random pick action while keeping Plex as the source of truth.'),
         ('v2.9.18.7', 'MyCouch Picks navigation: add View My Playlist links to Tonight on MyCouch and successful playlist actions, opening the signed-in Plex user’s own playlist.'),
         ('v2.9.18.6', 'Playlist API fix: import Flask jsonify so successful MyCouch Picks additions return JSON correctly instead of a false HTTP 500.'),

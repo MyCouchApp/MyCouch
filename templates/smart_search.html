@@ -36,7 +36,7 @@
     <p class="mb-0"><strong>No Plex password or MyCouch login is required to use <code>/search</code> in Discord.</strong> Access is controlled through your Discord server.</p>
   </div>
 </details>
-{% if q %}<section class="panel"><h4>Results for “{{q}}”</h4>
+{% if q %}<section class="panel"><div class="d-flex justify-content-between align-items-start gap-3 flex-wrap"><div><h4>Results for “{{q}}”</h4></div>{% if results and not show_closest %}<button class="btn btn-outline-info" type="button" data-bs-toggle="modal" data-bs-target="#searchSmartListModal">Create Smart Playlist from this search</button>{% endif %}</div>
 {% if interpretation %}<div class="small text-secondary mt-2 mb-3"><strong>Smart Search understood:</strong> {{ interpretation|join(' · ') }}</div>{% endif %}
 {% if not results and not show_closest %}
 <div class="alert alert-secondary mb-3">No exact matches found for all of those constraints.</div>
@@ -48,8 +48,9 @@
 </div>
 {% endif %}
 <div class="row g-3 mt-1">
-{% for x in results %}<div class="col-md-6 col-xl-4"><div class="card h-100 smart-card"><div class="row g-0 h-100"><div class="col-4 smart-poster-wrap"><img src="{{ url_for('smart_search_poster', item_id=x.metadata_id) }}" class="smart-poster" loading="lazy" alt="{{x.title}} poster" onerror="this.style.display='none';this.nextElementSibling.style.display='flex'"><div class="smart-poster-fallback" style="display:none">No poster</div></div><div class="col-8"><div class="card-body d-flex flex-column h-100"><h5 class="mb-1"><a href="/movie/{{x.metadata_id}}">{{x.title}}</a>{% if x.year %} <span class="text-muted">({{x.year}})</span>{% endif %}</h5>{% if x.genres_display %}<div class="small text-secondary mb-1">{{x.genres_display}}</div>{% endif %}{% if x.runtime_display %}<div class="small text-secondary mb-1">{{x.runtime_display}}</div>{% endif %}{% if x.director_list %}<div class="smart-people"><b>Director:</b> {{x.director_list|join(', ')}}</div>{% endif %}{% if x.actor_list %}<div class="smart-people mb-2"><b>Cast:</b> {{x.actor_list[:4]|join(', ')}}</div>{% endif %}<div class="mb-2"><span class="badge text-bg-info">{{x.match_label}}</span>{% if x.people_match %} <span class="badge text-bg-secondary">People match</span>{% endif %}</div><p class="smart-summary mb-3">{{x.summary or 'No Plex summary available.'}}</p><div class="mt-auto d-flex gap-2 flex-wrap"><a class="btn btn-sm btn-outline-light" href="/movie/{{x.metadata_id}}">Details</a>{% if x.plex_url %}<a class="btn btn-sm btn-warning" href="{{x.plex_url}}" target="_blank" rel="noopener">▶ Open in Plex</a>{% endif %}<button class="btn btn-sm btn-outline-info mc-playlist-action" type="button" data-playlist-id="{{x.metadata_id}}" onclick="mcAddToPlaylist(this.dataset.playlistId,this)">Add to My Playlist</button></div></div></div></div></div></div>{% else %}{% if show_closest %}<div class="col-12 text-muted">No close matches found either. Try relaxing one of the constraints in your search.</div>{% endif %}{% endfor %}
-</div></section>{% endif %}<script>
+{% for x in results %}<div class="col-md-6 col-xl-4"><div class="card h-100 smart-card"><div class="row g-0 h-100"><div class="col-4 smart-poster-wrap"><img src="{{ url_for('smart_search_poster', item_id=x.metadata_id) }}" class="smart-poster" loading="lazy" alt="{{x.title}} poster" onerror="this.style.display='none';this.nextElementSibling.style.display='flex'"><div class="smart-poster-fallback" style="display:none">No poster</div></div><div class="col-8"><div class="card-body d-flex flex-column h-100"><h5 class="mb-1"><a href="/movie/{{x.metadata_id}}">{{x.title}}</a>{% if x.year %} <span class="text-muted">({{x.year}})</span>{% endif %}</h5>{% if x.genres_display %}<div class="small text-secondary mb-1">{{x.genres_display}}</div>{% endif %}{% if x.runtime_display %}<div class="small text-secondary mb-1">{{x.runtime_display}}</div>{% endif %}{% if x.director_list %}<div class="smart-people"><b>Director:</b> {{x.director_list|join(', ')}}</div>{% endif %}{% if x.actor_list %}<div class="smart-people mb-2"><b>Cast:</b> {{x.actor_list[:4]|join(', ')}}</div>{% endif %}<div class="mb-2"><span class="badge text-bg-info">{{x.match_label}}</span>{% if x.people_match %} <span class="badge text-bg-secondary">People match</span>{% endif %}</div><p class="smart-summary mb-3">{{x.summary or 'No Plex summary available.'}}</p><div class="mt-auto d-flex gap-2 flex-wrap"><a class="btn btn-sm btn-outline-light" href="/movie/{{x.metadata_id}}">Details</a>{% if x.plex_url %}<a class="btn btn-sm btn-warning" href="{{x.plex_url}}" target="_blank" rel="noopener">▶ Open in Plex</a>{% endif %}<button class="btn btn-sm btn-outline-info mc-playlist-action" type="button" data-playlist-id="{{x.metadata_id}}" onclick="mcAddToPlaylist(this.dataset.playlistId,this)">Add to Playlist</button></div></div></div></div></div></div>{% else %}{% if show_closest %}<div class="col-12 text-muted">No close matches found either. Try relaxing one of the constraints in your search.</div>{% endif %}{% endfor %}
+</div></section>{% endif %}
+{% if q and results and not show_closest %}<div class="modal fade" id="searchSmartListModal" tabindex="-1"><div class="modal-dialog modal-dialog-centered"><div class="modal-content"><div class="modal-header"><h5 class="modal-title">Create Smart Playlist</h5><button class="btn-close" data-bs-dismiss="modal"></button></div><div class="modal-body"><label class="form-label">Playlist name</label><input id="searchSmartName" class="form-control mb-3" maxlength="120" value="{{q|e}}"><div class="small text-secondary mb-3">MyCouch will save this search and run it again whenever your Plex cache changes.</div><div class="form-check"><input class="form-check-input" type="checkbox" id="searchSmartSync"><label class="form-check-label" for="searchSmartSync">Sync this Smart Playlist to Plex automatically</label></div></div><div class="modal-footer"><button class="btn btn-outline-secondary" data-bs-dismiss="modal">Cancel</button><button class="btn btn-info" id="createSearchSmartList">Create Smart Playlist</button></div></div></div></div>{% endif %}<script>
 (function(){
   const form=document.getElementById('smart-search-form');
   if(!form) return;
@@ -89,6 +90,15 @@
     historyButton.addEventListener('click',function(){
       runSearch(historyButton.dataset.query||'');
     });
+  });
+  document.getElementById('createSearchSmartList')?.addEventListener('click',async function(){
+    const b=this,name=document.getElementById('searchSmartName').value.trim();
+    if(!name) return alert('Enter a playlist name.');
+    b.disabled=true;b.textContent='Creating…';
+    try{
+      const r=await fetch('/api/smart-playlists',{method:'POST',headers:{'Content-Type':'application/json','X-CSRF-Token':{{csrf_token()|tojson}}},body:JSON.stringify({name:name,query:{{q|tojson}},sync:document.getElementById('searchSmartSync').checked})});
+      const d=await r.json(); if(!r.ok||!d.ok) throw new Error(d.message||'Could not create Smart Playlist'); location.href=d.url;
+    }catch(e){b.disabled=false;b.textContent='Create Smart Playlist';alert(e.message);}
   });
 })();
 </script>

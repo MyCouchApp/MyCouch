@@ -8,7 +8,7 @@
     <div class="detail-meta"><span>{{seasons}} season{{'' if seasons==1 else 's'}}</span><span>{{s.episodes}} episodes</span><span>{{s.size_gb}} GB</span></div>
     <p class="detail-summary">Your Plex library has {{s.episodes}} episodes across {{seasons}} season{{'' if seasons==1 else 's'}}, with {{watched}} watched.</p>
     <div class="detail-actions">
-      {% if s.plex_url %}<a class="btn btn-warning" href="{{s.plex_url}}" target="_blank" rel="noopener">▶ Open in Plex</a>{% endif %}<button class="btn btn-outline-info mc-playlist-action" type="button" data-playlist-id="{{s.show_id}}" onclick="mcAddToPlaylist(this.dataset.playlistId,this)">Add to My Playlist</button>
+      {% if s.plex_url %}<a class="btn btn-warning" href="{{s.plex_url}}" target="_blank" rel="noopener">▶ Open in Plex</a>{% endif %}<button class="btn btn-outline-info mc-playlist-action" type="button" data-playlist-id="{{s.show_id}}" onclick="mcAddToPlaylist(this.dataset.playlistId,this)">Add to Playlist</button>
       {% if s.arr_url and is_admin() %}<a class="btn btn-outline-info" href="{{s.arr_url}}" target="_blank">Open in Sonarr ↗</a>
       {% elif s.arr_url %}<span class="badge text-bg-success">Sonarr matched</span>
       {% elif s.arr_status=='alternate' %}<span class="badge text-bg-warning">Alternate / duplicate?</span>

@@ -1,8 +1,8 @@
 # 🛋️ MyCouch
 
-**Current release: v2.9.18.8**
+**Current release: v2.9.19**
 
-v2.9.17 focuses on Settings and page polish: Plex cache refresh progress is now stable after an update completes, key pages use centered mascot-led headers, and Movies/TV keep Export CSV at the far right of the library filter bar. It retains the people-aware Smart Search, Universal Media Preview and private-access model introduced across recent releases.
+v2.9.19 expands playlist support: MyCouch now discovers the signed-in user’s Plex playlists, lets titles be added to an existing or newly named playlist, and adds personal Smart Lists that update from the local Plex cache.
 
 <img src="static/mycouch-github.png" alt="MyCouch couch mascot" width="180">
 
@@ -12,7 +12,26 @@ MyCouch is a self-hosted companion for exploring and understanding a Plex media 
 
 > MyCouch is an independent project and is not affiliated with Plex, Tautulli, Radarr, Sonarr, Discord, Emby or Jellyfin.
 
-## Current release — v2.9.18.8
+## Current release — v2.9.19
+
+### v2.9.19.1 — Smart Search Playlists & Plex Sync
+
+- Create a named Smart Playlist directly from an exact Smart Search result set.
+- Saved-search Smart Playlists re-run the original query as the Plex cache changes.
+- Smart Lists can be synced to a real Plex playlist, reconciled automatically after Plex cache refreshes, synced on demand, or disconnected while leaving the Plex playlist intact.
+
+
+
+### v2.9.19 — My Playlists & Smart Lists
+
+- Discovers all video playlists available to the signed-in Plex user.
+- **Add to Playlist** now lets you choose an existing Plex playlist instead of always using MyCouch Picks.
+- Create a newly named Plex playlist while adding a movie or TV show.
+- Renames the built-in page to **My Playlists** and lets you browse each Plex playlist inside MyCouch.
+- Adds personal **Smart Lists** powered by the local MyCouch cache.
+- Smart List rules include Unwatched, Added in the last 30 days, Highly Rated + Unwatched, and Recently Added (90 days), for Movies or TV Shows.
+- Smart Lists update automatically as the MyCouch Plex cache changes.
+- Playlist selection is available from the same shared action used by detail pages, Smart Search, Tonight on MyCouch and Universal Media Preview hover cards.
 
 ### v2.9.18.8 — My Playlist inside MyCouch
 
