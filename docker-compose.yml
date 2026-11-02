@@ -1,0 +1,18 @@
+services:
+  mycouch:
+    build: .
+    container_name: mycouch
+    restart: unless-stopped
+    ports:
+      - "8090:8090"
+    environment:
+      TZ: Pacific/Auckland
+      PORT: "8090"
+      MYCOUCH_DATA_DIR: /app/data
+      MYCOUCH_SECURE_COOKIE: "1"
+      # Set this after mounting the Plex database into the container:
+      # PLEX_DB: /plex-db/com.plexapp.plugins.library.db
+    volumes:
+      - ./data:/app/data
+      # Example: mount a read-only folder containing the Plex SQLite database.
+      # - /mnt/plex-db:/plex-db:ro

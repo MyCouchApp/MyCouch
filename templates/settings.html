@@ -46,6 +46,19 @@
 <form method="post" action="/settings" id="dbSelectForm"><input type="hidden" name="_csrf" value="{{csrf_token()}}"><input type="hidden" name="plex_db" id="selectedDb"></form>
 
 <div class="card p-3 mb-4">
+  <h5>Uptime Kuma service status</h5>
+  <p class="text-muted">Powers the MyCouch <b>Services</b> page. MyCouch reads Kuma's Prometheus metrics server-side; the API key is stored locally and is never sent to browsers.</p>
+  <form method="post" action="/uptime-kuma/save" class="row g-3 align-items-end"><input type="hidden" name="_csrf" value="{{csrf_token()}}">
+    <div class="col-md-7"><label class="form-label">Uptime Kuma URL</label><input class="form-control" name="uptime_kuma_url" value="{{kuma.url}}" placeholder="http://192.168.1.200:3001"></div>
+    <div class="col-md-5"><label class="form-label">Uptime Kuma API key</label><input class="form-control" type="password" name="uptime_kuma_api_key" placeholder="{{'Saved — leave blank to keep' if kuma.key else 'Create in Kuma → Settings → Security → API Keys'}}"></div>
+    <div class="col-12"><label class="form-label">Hidden monitor IDs</label><input class="form-control" name="uptime_kuma_hidden_monitor_ids" value="{{kuma.hidden_ids}}" placeholder="e.g. 1,2"><div class="form-text">Optional. Hides stale/deleted Kuma metric IDs from MyCouch without deleting Kuma history. You can also hide a service directly from the Services page.</div></div>
+    <div class="col-12"><button class="btn btn-primary">Save Kuma settings</button></div>
+  </form>
+  <form method="post" action="/uptime-kuma/test" class="mt-3"><input type="hidden" name="_csrf" value="{{csrf_token()}}"><button class="btn btn-outline-light" {% if not kuma.key %}disabled{% endif %}>Test Uptime Kuma</button> <a class="btn btn-outline-secondary ms-1" href="/services">View Services</a></form>
+  <div class="small text-muted mt-2">Only monitor name, state and response time are exposed on the Services page. Monitor URLs, API keys and Kuma credentials are not shown.</div>
+</div>
+
+<div class="card p-3 mb-4">
   <h5>Radarr / Sonarr integrations</h5>
   <p class="text-muted">Read-only matching. API keys are saved only in this app's local <code>auditor.db</code>. No delete, unmonitor or search actions are enabled.</p>
   <form method="post" action="/integrations/save" class="row g-3"><input type="hidden" name="_csrf" value="{{csrf_token()}}">

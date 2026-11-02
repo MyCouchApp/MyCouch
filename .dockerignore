@@ -1,0 +1,14 @@
+.git
+.venv
+__pycache__
+*.pyc
+*.pyo
+*.db
+*.db-wal
+*.db-shm
+.pla-secret
+.env
+backups
+logs
+plex-snapshot-*
+data/*

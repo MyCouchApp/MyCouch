@@ -1,0 +1,49 @@
+{% extends 'base.html' %}{% block content %}
+<section class="mc-page-hero mb-4">
+  <img src="/static/mascots/server-card.png" alt="" aria-hidden="true">
+  <h1>Services</h1>
+  <p>Live service health from Uptime Kuma. See what is available before wondering whether it is just the couch again.</p>
+</section>
+
+{% if error %}
+<div class="alert alert-warning"><strong>Service status unavailable.</strong> {{error}}{% if is_admin() %} <a href="/settings" class="alert-link">Configure Uptime Kuma in Settings.</a>{% endif %}</div>
+{% else %}
+<section class="services-overview mb-4">
+  <div class="services-overall {% if down %}is-down{% elif pending %}is-pending{% else %}is-up{% endif %}">
+    <span class="service-dot"></span>
+    <div><strong>{% if down %}{{down}} service{{'' if down==1 else 's'}} unavailable{% elif pending %}Checks still settling{% elif maintenance %}Maintenance in progress{% else %}All systems operational{% endif %}</strong><small>{{up}} of {{total}} services up{% if maintenance %} · {{maintenance}} in maintenance{% endif %}</small></div>
+  </div>
+  <div class="services-updated">Updated <span id="servicesUpdated">just now</span></div>
+</section>
+
+<div id="servicesGroups">
+{% for group in groups %}
+<section class="panel service-group mb-3" data-service-group="{{group.name}}">
+  <div class="service-group-head"><div><h3>{{group.name}}</h3><p>{{group['items']|selectattr('status','equalto','Up')|list|length}} / {{group['items']|length}} up</p></div><span class="service-group-state {% if group['items']|selectattr('status','equalto','Down')|list|length %}is-down{% else %}is-up{% endif %}"></span></div>
+  <div class="service-list">
+  {% for service in group['items'] %}
+    <div class="service-row" data-service-name="{{service.name}}">
+      <div class="service-name"><span class="service-dot is-{{service.status|lower}}"></span><strong>{{service.name}}</strong></div>
+      <div class="service-meta"><span class="service-response">{% if service.response_ms is not none %}{{service.response_ms|round|int}} ms{% endif %}</span><span class="service-badge is-{{service.status|lower}}">{{service.status}}</span>{% if is_admin() and service.id %}<form method="post" action="/uptime-kuma/hide-monitor" class="d-inline ms-2" onsubmit="return confirm('Hide {{service.name|e}} from MyCouch Services? Kuma itself will not be changed.')"><input type="hidden" name="_csrf" value="{{csrf_token()}}"><input type="hidden" name="monitor_id" value="{{service.id}}"><button class="btn btn-sm btn-outline-secondary" type="submit">Hide</button></form>{% endif %}</div>
+    </div>
+  {% endfor %}
+  </div>
+</section>
+{% endfor %}
+</div>
+{% if not total %}<div class="panel text-center py-5"><h3>No service monitors found</h3><p class="text-muted mb-0">Check the Uptime Kuma connection in Settings.</p></div>{% endif %}
+{% endif %}
+
+<script>
+(function(){
+  const updated=document.getElementById('servicesUpdated'); if(!updated)return;
+  let last=Date.now();
+  function age(){const s=Math.max(0,Math.floor((Date.now()-last)/1000));updated.textContent=s<10?'just now':s<60?`${s}s ago`:`${Math.floor(s/60)}m ago`;}
+  setInterval(age,5000);
+  async function refresh(){try{const r=await fetch('/api/services/status',{headers:{Accept:'application/json'}});const d=await r.json();if(!r.ok||!d.ok)return;last=Date.now();age();
+    (d.services||[]).forEach(s=>{const row=[...document.querySelectorAll('[data-service-name]')].find(x=>x.dataset.serviceName===s.name);if(!row)return;const dot=row.querySelector('.service-dot'),badge=row.querySelector('.service-badge'),resp=row.querySelector('.service-response');dot.className='service-dot is-'+s.status.toLowerCase();badge.className='service-badge is-'+s.status.toLowerCase();badge.textContent=s.status;resp.textContent=s.response_ms==null?'':Math.round(s.response_ms)+' ms';});
+  }catch(e){}}
+  setInterval(refresh,30000);
+})();
+</script>
+{% endblock %}

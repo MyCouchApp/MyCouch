@@ -1,4 +1,4 @@
-import os, sqlite3, csv, io, shutil, tempfile, time, threading, json, urllib.request, urllib.error, secrets, re, math, mimetypes, xml.etree.ElementTree as ET
+import os, sqlite3, csv, io, shutil, tempfile, time, threading, json, urllib.request, urllib.error, secrets, re, math, mimetypes, base64, xml.etree.ElementTree as ET
 from datetime import datetime, timezone, timedelta
 from urllib.parse import urlencode, quote
 from flask import Flask, render_template, request, redirect, url_for, Response, abort, flash, session, g, send_from_directory, jsonify
@@ -6,7 +6,12 @@ import requests
 
 from werkzeug.security import generate_password_hash, check_password_hash
 
-_SECRET_FILE=os.path.join(os.path.dirname(__file__),'.pla-secret')
+APP_DIR=os.path.dirname(os.path.abspath(__file__))
+# Preserve the legacy Windows layout by default. Docker explicitly sets
+# MYCOUCH_DATA_DIR=/app/data in docker-compose.yml / Dockerfile.
+DATA_DIR=os.path.abspath(os.environ.get('MYCOUCH_DATA_DIR') or APP_DIR)
+os.makedirs(DATA_DIR,exist_ok=True)
+_SECRET_FILE=os.path.join(DATA_DIR,'.pla-secret')
 def _app_secret():
     env=os.environ.get('MYCOUCH_SECRET') or os.environ.get('PLA_SECRET')
     if env: return env
@@ -21,7 +26,7 @@ def _app_secret():
 app=Flask(__name__); app.secret_key=_app_secret()
 app.config.update(SESSION_COOKIE_HTTPONLY=True,SESSION_COOKIE_SAMESITE='Lax',SESSION_COOKIE_SECURE=(os.environ.get('MYCOUCH_SECURE_COOKIE') or os.environ.get('PLA_SECURE_COOKIE','0'))=='1',PERMANENT_SESSION_LIFETIME=timedelta(days=30))
 BUILD_LOCK=threading.Lock()
-APP_VERSION='2.9.19.1'
+APP_VERSION='2.9.19.2'
 PLEX_UPDATE_STATUS={'running':False,'last_update':None,'error':None}
 SMART_LOCK=threading.Lock(); SMART_MODEL=None; SMART_VECTORS=None; SMART_IDS=None
 BUILD_STATUS={'running':False,'stage':'Idle','percent':0,'current':0,'total':0,'message':'','started_at':None,'elapsed':0,'error':None,'complete':False}
@@ -34,8 +39,8 @@ PLEX_ITEM_VALIDITY={}
 TAUTULLI_STATUS={'running':False,'stage':'Idle','percent':0,'current':0,'total':0,'message':'','started_at':None,'elapsed':0,'error':None,'complete':False}
 ARR_STATUS={'running':False,'stage':'Idle','percent':0,'current':0,'total':0,'message':'','started_at':None,'elapsed':0,'error':None,'complete':False,'radarr':{},'sonarr':{}}
 DEFAULT_DB_PATH=os.environ.get('PLEX_DB','')
-CONFIG_DB=os.path.join(os.path.dirname(__file__),'auditor.db')
-CACHE_DB=os.path.join(os.path.dirname(__file__),'auditor-cache.db')
+CONFIG_DB=os.path.join(DATA_DIR,'auditor.db')
+CACHE_DB=os.path.join(DATA_DIR,'auditor-cache.db')
 
 def get_db_path():
     c=config(); row=c.execute("select value from settings where key='plex_db'").fetchone(); c.close()
@@ -210,7 +215,7 @@ app.jinja_env.filters['timestamp_date']=lambda v: datetime.fromtimestamp(int(v))
 app.jinja_env.filters['timestamp_datetime']=lambda v: datetime.fromtimestamp(int(v)).strftime('%d %b %Y %H:%M:%S') if v else '—'
 
 # Endpoints that expose library/history data require a verified Plex account.
-PLEX_ENDPOINTS={'dashboard','movie_page','tv_page','movie_detail','show_detail','smart_search','tonight_on_mycouch','tonight_playlist_add','my_playlist','playlist_add_api','playlist_remove_api','playlist_list_api','smart_playlist_create_api','smart_search_history_clear','smart_search_poster','now_playing_api','media_preview_api','cleanup','my_history','changelog'}
+PLEX_ENDPOINTS={'dashboard','movie_page','tv_page','movie_detail','show_detail','smart_search','tonight_on_mycouch','tonight_playlist_add','my_playlist','playlist_add_api','playlist_remove_api','playlist_list_api','smart_playlist_create_api','smart_search_history_clear','smart_search_poster','now_playing_api','media_preview_api','cleanup','my_history','services','services_status_api','changelog'}
 # These are reachable before Plex authorization. Dashboard renders only the landing page while signed out.
 ANON_ENDPOINTS={'dashboard','setup_admin','login','logout','static','service_worker','robots_txt','plex_signin','plex_callback','plex_mobile_callback','plex_mobile_finalize','plex_logout'}
 
@@ -1257,7 +1262,7 @@ def cleanup_plex_snapshots(max_age_seconds=21600):
     Startup cleanup only removes files older than six hours so a snapshot that may still
     belong to another running Auditor process is left alone.
     """
-    workdir=os.path.dirname(__file__)
+    workdir=DATA_DIR
     now=time.time(); removed=0
     try:
         for name in os.listdir(workdir):
@@ -1287,7 +1292,7 @@ def _remove_snapshot_family(snapshot):
             pass
 
 def refresh_cache():
-    source=get_db_path(); workdir=os.path.dirname(__file__)
+    source=get_db_path(); workdir=DATA_DIR
     fd,snapshot=tempfile.mkstemp(prefix='plex-snapshot-',suffix='.db',dir=workdir); os.close(fd)
     build=CACHE_DB+'.building'
     started=time.time()
@@ -2280,6 +2285,96 @@ def _dashboard_user_count():
         return c.execute("select count(distinct user) n from tautulli_history where trim(coalesce(user,''))<>''").fetchone()['n']
     finally: c.close()
 
+# Uptime Kuma service-status integration (v2.9.19.2)
+KUMA_STATUS_CACHE={'at':0,'data':None}
+
+def _prometheus_labels(text):
+    out={}
+    for m in re.finditer(r'(\w+)=\"((?:\\.|[^\"\\])*)\"',text or ''):
+        value=m.group(2).replace('\\\\\"','\"').replace('\\\\\\\\','\\\\')
+        out[m.group(1)]=value
+    return out
+
+def _service_group(name, monitor_type=''):
+    n=(name or '').lower()
+    if n.endswith(' - external') or 'external' in n: return 'External Services'
+    if any(x in n for x in ('sonarr','radarr','prowlarr','bazarr')): return 'Media Automation'
+    if any(x in n for x in ('docker laptop','server host','host')) or monitor_type=='ping': return 'Infrastructure'
+    if any(x in n for x in ('plex','mycouch')): return 'Media Services'
+    if any(x in n for x in ('jellyfin','tautulli','portainer','seerr','kavita','tunarr','uptime kuma')): return 'Docker Services'
+    return 'Other Services'
+
+def _kuma_metrics(force=False):
+    now=time.time()
+    if not force and KUMA_STATUS_CACHE.get('data') is not None and now-KUMA_STATUS_CACHE.get('at',0)<15:
+        return KUMA_STATUS_CACHE['data']
+    base=setting('uptime_kuma_url','http://192.168.1.200:3001').strip().rstrip('/')
+    key=setting('uptime_kuma_api_key','').strip()
+    if not base or not key:
+        raise RuntimeError('Uptime Kuma is not configured yet.')
+    token=base64.b64encode(('mycouch:'+key).encode('utf-8')).decode('ascii')
+    req=urllib.request.Request(base+'/metrics',headers={'Authorization':'Basic '+token,'Accept':'text/plain','User-Agent':'MyCouch/'+APP_VERSION})
+    with urllib.request.urlopen(req,timeout=8) as r:
+        text=r.read().decode('utf-8','replace')
+    statuses={}; response_times={}
+    for line in text.splitlines():
+        if not line or line.startswith('#'): continue
+        m=re.match(r'^(monitor_status|monitor_response_time)\{(.*)\}\s+(-?[0-9.]+)',line)
+        if not m: continue
+        metric,label_text,value=m.groups(); labels=_prometheus_labels(label_text)
+        name=labels.get('monitor_name') or labels.get('name')
+        if not name: continue
+        if (labels.get('monitor_type') or '').lower()=='group': continue
+        monitor_id=str(labels.get('monitor_id') or '')
+        metric_key=monitor_id or name
+        if metric=='monitor_status': statuses[metric_key]={'id':monitor_id,'name':name,'type':labels.get('monitor_type',''),'value':int(float(value))}
+        else: response_times[metric_key]=float(value)
+    hidden_ids={x.strip() for x in setting('uptime_kuma_hidden_monitor_ids','').split(',') if x.strip()}
+    services=[]
+    state_names={0:'Down',1:'Up',2:'Pending',3:'Maintenance'}
+    for metric_key,item in statuses.items():
+        if item.get('id') and item['id'] in hidden_ids: continue
+        name=item['name']; value=item['value']; state=state_names.get(value,'Unknown')
+        services.append({'id':item.get('id',''),'name':name,'status':state,'status_code':value,'response_ms':response_times.get(metric_key),'group':_service_group(name,item.get('type',''))})
+    order={'Down':0,'Pending':1,'Maintenance':2,'Unknown':3,'Up':4}
+    services.sort(key=lambda x:(order.get(x['status'],9),x['name'].lower()))
+    result={'services':services,'checked_at':int(now),'source_url':base}
+    KUMA_STATUS_CACHE.update(at=now,data=result)
+    return result
+
+@app.get('/services')
+def services():
+    data=None; error=''
+    try: data=_kuma_metrics()
+    except Exception as e: error=str(e)
+    services=(data or {}).get('services',[])
+    groups=[]
+    for group_name in ('Media Services','Media Automation','Docker Services','Infrastructure','External Services','Other Services'):
+        items=[x for x in services if x['group']==group_name]
+        if items: groups.append({'name':group_name,'items':items})
+    up=sum(1 for x in services if x['status']=='Up'); down=sum(1 for x in services if x['status']=='Down')
+    pending=sum(1 for x in services if x['status'] in ('Pending','Unknown')); maintenance=sum(1 for x in services if x['status']=='Maintenance')
+    return render_template('services.html',groups=groups,total=len(services),up=up,down=down,pending=pending,maintenance=maintenance,error=error,checked_at=(data or {}).get('checked_at'))
+
+
+@app.post('/uptime-kuma/hide-monitor')
+def uptime_kuma_hide_monitor():
+    monitor_id=(request.form.get('monitor_id') or '').strip()
+    if monitor_id and monitor_id.isdigit():
+        hidden={x.strip() for x in setting('uptime_kuma_hidden_monitor_ids','').split(',') if x.strip()}
+        hidden.add(monitor_id)
+        set_setting('uptime_kuma_hidden_monitor_ids',','.join(sorted(hidden,key=int)))
+        KUMA_STATUS_CACHE.update(at=0,data=None)
+        flash('Service hidden from MyCouch. Uptime Kuma history was not changed.','success')
+    return redirect(url_for('services'))
+
+@app.get('/api/services/status')
+def services_status_api():
+    try:
+        data=_kuma_metrics(); return jsonify({'ok':True,**data})
+    except Exception as e:
+        return jsonify({'ok':False,'message':str(e)}),503
+
 @app.route('/')
 def dashboard():
     if not has_plex_access():
@@ -2588,6 +2683,28 @@ def plex_connection_save():
     except Exception as e: flash('Plex settings saved; connection test failed: '+str(e),'warning')
     return redirect(url_for('settings'))
 
+@app.post('/uptime-kuma/save')
+def uptime_kuma_save():
+    set_setting('uptime_kuma_url',(request.form.get('uptime_kuma_url') or 'http://192.168.1.200:3001').strip().rstrip('/'))
+    key=(request.form.get('uptime_kuma_api_key') or '').strip()
+    if key: set_setting('uptime_kuma_api_key',key)
+    hidden=(request.form.get('uptime_kuma_hidden_monitor_ids') or '').strip()
+    hidden=','.join(x.strip() for x in hidden.split(',') if x.strip().isdigit())
+    set_setting('uptime_kuma_hidden_monitor_ids',hidden)
+    KUMA_STATUS_CACHE.update(at=0,data=None)
+    flash('Uptime Kuma settings saved locally.','success')
+    return redirect(url_for('settings'))
+
+@app.post('/uptime-kuma/test')
+def uptime_kuma_test():
+    KUMA_STATUS_CACHE.update(at=0,data=None)
+    try:
+        data=_kuma_metrics(force=True)
+        flash(f"Uptime Kuma connected successfully · {len(data['services'])} monitors found.",'success')
+    except Exception as e:
+        flash('Uptime Kuma connection failed: '+str(e),'danger')
+    return redirect(url_for('settings'))
+
 @app.post('/integrations/save')
 def integrations_save():
     for kind,default in [('radarr','http://localhost:7878'),('sonarr','http://localhost:7879')]:
@@ -2894,6 +3011,7 @@ def settings():
         return redirect(url_for('settings'))
     c=config(); p=c.execute('select * from protected order by kind,title').fetchall(); c.close(); 
     mc=config(); counts={r['kind']:r['n'] for r in mc.execute('select kind,count(*) n from arr_matches group by kind')}; mc.close()
+    kuma={'url':setting('uptime_kuma_url','http://192.168.1.200:3001'),'key':bool(setting('uptime_kuma_api_key')),'hidden_ids':setting('uptime_kuma_hidden_monitor_ids','')}
     integrations={'radarr_url':setting('radarr_url','http://localhost:7878'),'sonarr_url':setting('sonarr_url','http://localhost:7879'),'radarr_key':bool(setting('radarr_api_key')),'sonarr_key':bool(setting('sonarr_api_key')),'movie_matches':counts.get('movie',0),'tv_matches':counts.get('tv',0)}
     tc=config(); tautulli_items=tc.execute('select count(*) n from tautulli_activity').fetchone()['n']; tc.close()
     tautulli={'url':setting('tautulli_url','http://localhost:8181'),'key':bool(setting('tautulli_api_key')),'last_sync':setting('tautulli_last_sync','Never'),'items':tautulli_items,'authoritative':setting('tautulli_authoritative','0')=='1','auto_enabled':setting('tautulli_auto_enabled','0')=='1','frequency':setting('tautulli_auto_frequency','daily'),'time':setting('tautulli_auto_time','01:00'),'day':setting('tautulli_auto_day','mon')}
@@ -2902,7 +3020,7 @@ def settings():
     security={'remember_days':setting('remember_days','30')}
     backup={'enabled':setting('backup_auto_enabled','0')=='1','path':setting('backup_path',''),'time':setting('backup_time','02:00'),'keep':setting('backup_keep','14'),'last_success':setting('backup_last_success','Never'),'running':BACKUP_STATUS.get('running',False),'error':BACKUP_STATUS.get('error')}
     discord={'enabled':setting('discord_auto_enabled','0')=='1','webhook':bool(setting('discord_webhook_url')),'frequency':setting('discord_frequency','weekly'),'time':setting('discord_post_time','19:00'),'weekday':setting('discord_weekday','4'),'cooldown':setting('discord_cooldown_days','90'),'stats_days':setting('discord_stats_days','30'),'categories':set(setting('discord_categories','popular_movie,popular_tv,viewing_hours,storage_hog,forgotten,movie_recommendation,tv_recommendation').split(',')),'movie_webhook':bool(setting('discord_movie_webhook_url')),'tv_webhook':bool(setting('discord_tv_webhook_url')),'last_post':setting('discord_last_post','Never'),'last_error':setting('discord_last_error',''),'leaving_days':setting('leaving_soon_days','14'),'bot_enabled':setting('discord_bot_enabled','0')=='1','bot_token':bool(setting('discord_bot_token')),'bot_guild_id':setting('discord_bot_guild_id',''),'bot_ephemeral':setting('discord_bot_ephemeral','1')=='1','bot_status':dict(DISCORD_BOT_STATUS)}
-    return render_template('settings.html',db=get_db_path(),protected=p,cache=cache_meta(),integrations=integrations,tautulli=tautulli,backup=backup,security=security,discord=discord,plex_update=plex_update,plex_connection=plex_connection)
+    return render_template('settings.html',db=get_db_path(),protected=p,cache=cache_meta(),kuma=kuma,integrations=integrations,tautulli=tautulli,backup=backup,security=security,discord=discord,plex_update=plex_update,plex_connection=plex_connection)
 
 if __name__=='__main__':
     cleanup_plex_snapshots()

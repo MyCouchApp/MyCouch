@@ -1,8 +1,8 @@
 # 🛋️ MyCouch
 
-**Current release: v2.9.19**
+**Current release: v2.9.19.2**
 
-v2.9.19 expands playlist support: MyCouch now discovers the signed-in user’s Plex playlists, lets titles be added to an existing or newly named playlist, and adds personal Smart Lists that update from the local Plex cache.
+v2.9.19.2 adds an Uptime Kuma-powered Services page and reorganises the sidebar into clearer Home, Discover, Library, Status and Admin sections.
 
 <img src="static/mycouch-github.png" alt="MyCouch couch mascot" width="180">
 
@@ -12,7 +12,15 @@ MyCouch is a self-hosted companion for exploring and understanding a Plex media 
 
 > MyCouch is an independent project and is not affiliated with Plex, Tautulli, Radarr, Sonarr, Discord, Emby or Jellyfin.
 
-## Current release — v2.9.19
+## Current release — v2.9.19.2
+
+### v2.9.19.2 — Services & Navigation
+
+- Reorganises the sidebar into **Home**, **Discover**, **Library**, **Status** and a collapsible **Admin** section.
+- Adds **Services**, available to authorised Plex users, with current Uptime Kuma monitor state and response time.
+- Reads Uptime Kuma Prometheus metrics server-side using a Kuma API key; credentials and monitor URLs are never exposed to browsers.
+- Adds Uptime Kuma URL/API-key configuration and a connection test to Settings.
+- Refreshes service status in-page while keeping a short server-side cache to avoid unnecessary polling load.
 
 ### v2.9.19.1 — Smart Search Playlists & Plex Sync
 
@@ -284,3 +292,7 @@ The artwork sheet is `static/mycouch-artwork.jpg`; the square GitHub avatar is `
 
 ### v2.9.18.3
 MyCouch Picks is now available as a shared movie and TV action across title pages, Smart Search and Universal Media Preview hover cards. Items are added to the signed-in Plex user’s `MyCouch Picks` playlist.
+
+## Docker
+
+MyCouch now includes a `Dockerfile` and `docker-compose.yml`. Runtime state is stored in `/app/data` so `auditor.db`, `auditor-cache.db` and `.pla-secret` survive container replacement. Plex's SQLite library database must be mounted read-only into the container for library refreshes. See `DOCKER.md` for migration instructions.
