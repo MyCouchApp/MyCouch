@@ -26,7 +26,7 @@ def _app_secret():
 app=Flask(__name__); app.secret_key=_app_secret()
 app.config.update(SESSION_COOKIE_HTTPONLY=True,SESSION_COOKIE_SAMESITE='Lax',SESSION_COOKIE_SECURE=(os.environ.get('MYCOUCH_SECURE_COOKIE') or os.environ.get('PLA_SECURE_COOKIE','0'))=='1',PERMANENT_SESSION_LIFETIME=timedelta(days=30))
 BUILD_LOCK=threading.Lock()
-APP_VERSION='2.9.19.2'
+APP_VERSION='2.9.20'
 PLEX_UPDATE_STATUS={'running':False,'last_update':None,'error':None}
 SMART_LOCK=threading.Lock(); SMART_MODEL=None; SMART_VECTORS=None; SMART_IDS=None
 BUILD_STATUS={'running':False,'stage':'Idle','percent':0,'current':0,'total':0,'message':'','started_at':None,'elapsed':0,'error':None,'complete':False}
@@ -215,7 +215,7 @@ app.jinja_env.filters['timestamp_date']=lambda v: datetime.fromtimestamp(int(v))
 app.jinja_env.filters['timestamp_datetime']=lambda v: datetime.fromtimestamp(int(v)).strftime('%d %b %Y %H:%M:%S') if v else '—'
 
 # Endpoints that expose library/history data require a verified Plex account.
-PLEX_ENDPOINTS={'dashboard','movie_page','tv_page','movie_detail','show_detail','smart_search','tonight_on_mycouch','tonight_playlist_add','my_playlist','playlist_add_api','playlist_remove_api','playlist_list_api','smart_playlist_create_api','smart_search_history_clear','smart_search_poster','now_playing_api','media_preview_api','cleanup','my_history','services','services_status_api','changelog'}
+PLEX_ENDPOINTS={'dashboard','movie_page','tv_page','movie_detail','show_detail','smart_search','tonight_on_mycouch','tonight_playlist_add','my_playlist','playlist_add_api','playlist_remove_api','playlist_list_api','smart_playlist_create_api','smart_search_history_clear','smart_search_poster','now_playing_api','media_preview_api','cleanup','my_history','services','services_status_api','file_processing','changelog'}
 # These are reachable before Plex authorization. Dashboard renders only the landing page while signed out.
 ANON_ENDPOINTS={'dashboard','setup_admin','login','logout','static','service_worker','robots_txt','plex_signin','plex_callback','plex_mobile_callback','plex_mobile_finalize','plex_logout'}
 
@@ -2863,7 +2863,7 @@ def leaving_soon_post():
     days=max(0,int((r['deadline']-time.time())/86400)+1); size=f" · {r['size_gb']:,.1f} GB" if r['size_gb'] is not None else ''
     fields=[]
     if r['size_gb'] is not None: fields.append({'name':'Size','value':f'{r["size_gb"]:,.1f} GB','inline':True})
-    fields.extend([{'name':'Review In','value':f'About {days} days','inline':True},{'name':'Feedback','value':'👍 Keep  •  🗑️ Fine to remove','inline':False}])
+    fields.extend([{'name':'Review In','value':f'About {days} days','inline':True},{'name':'Feedback','value':'ðŸ‘ Keep  •  ðŸ—‘ï¸ Fine to remove','inline':False}])
     embed=_discord_embed(f'Leaving Soon: {r["title"]}','This title is being reviewed for removal from the Plex library. Any Keep response should be treated as a reason to protect it.',fields,'MyCouch • No automatic deletion'); embed['_plex_item_id']=str(item_id)
     try:
         discord_webhook_send(embed=embed); c=config(); c.execute('update leaving_soon set discord_posted=1 where kind=? and item_id=?',(kind,item_id)); c.commit(); c.close(); flash('Leaving Soon announcement posted.','success')
@@ -2897,7 +2897,7 @@ def changelog():
         ('v2.9.18', 'Tonight on MyCouch: adds five local recommendation modes — Quick Watch, Movie Night, Something Different, Comfort Watch and Surprise Me — with three focused movie picks, plain-language reasons, Plex links, Universal Media Preview support and a Nah, try again reshuffle that avoids immediate repeats.'),
         ('v2.9.17', 'Settings & Page Polish: fixed repeated Settings reloads after completed Plex refreshes, stabilised progress/status panels, refreshed static/PWA caching, and introduced centered mascot-led page headers. Movies and TV Export CSV controls moved to the far-right of their filter bars.'),
         ('v2.9.16', 'Universal Media Preview: larger rich movie and TV preview cards now work across MyCouch wherever a local movie/show detail link appears, including Dashboard shelves, Now Playing, Movies, TV, Smart Search, History, Review Queue and Leaving Soon. Previews are fetched from the local cache on demand and reused in-browser.'),
-        ('v2.9.15.2', 'Smart Search intent fix: multi-person searches such as “Ben Affleck and Matt Damon together” now require both people in the same title, while person-plus-role searches such as “Robin Williams in a serious role” combine the actor match with dramatic genre intent instead of matching unrelated words.'),
+        ('v2.9.15.2', 'Smart Search intent fix: multi-person searches such as “Ben Affleck and Matt Damon togetherâ€ now require both people in the same title, while person-plus-role searches such as “Robin Williams in a serious roleâ€ combine the actor match with dramatic genre intent instead of matching unrelated words.'),
         ('v2.9.15.1', 'Smart Search people-ranking fix: full actor/director name matches now receive a strong ranking boost, and the People match badge is only shown when the searched person actually matches cached Plex people metadata. Also restores the missing v2.9.15 entry on the visible Changelog page.'),
         ('v2.9.15', 'Smart Search, Discord & UI Polish: added people-aware searching using cached Plex cast and director metadata, cast/director details on movie results and detail pages, natural runtime display, shared Smart Search behaviour for Discord /search, responsive result improvements and light-mode polish. Run Update Plex Now once after upgrading to populate people metadata.'),
         ('v2.9.14.3', 'Fixed stale Plex ratingKeys that still existed in the local MyCouch cache: historical items are now validated against the live Plex server before being treated as current, stale title/year candidates are filtered, and poster requests can retry through the historical identity relinker.'),
@@ -2910,7 +2910,7 @@ def changelog():
         ('v2.9.10', 'Added the MyCouch couch artwork to the dashboard, navigation and section headings, with a light-theme logo and GitHub avatar.'),
         ('v2.9.9', 'Dashboard redesign: Welcome moved to the top, library summary cards moved to Server Stats, Recently Added and Recently Watched poster panels added, split primary/secondary navigation, and retained live Now Playing and Tautulli activity.'),
         ('v2.9.8', 'UI and navigation update: reordered the main menu, renamed Cleanup to Server Stats, added a collapsible linked MyCouch introduction to the Dashboard, and documented Discord /search directly on Smart Search.'),
-        ('v2.9.7', 'Renamed LibraryLens to MyCouch. Added GitHub-ready project hygiene, removed machine-specific defaults, refreshed documentation and branding, and renamed the dashboard Now Playing section to “What’s Playing on MyCouch?”. Existing auditor.db, auditor-cache.db and .pla-secret files remain compatible.'),
+        ('v2.9.7', 'Renamed LibraryLens to MyCouch. Added GitHub-ready project hygiene, removed machine-specific defaults, refreshed documentation and branding, and renamed the dashboard Now Playing section to “What’s Playing on MyCouch?â€. Existing auditor.db, auditor-cache.db and .pla-secret files remain compatible.'),
         ('v2.9.6.2', 'Fixed natural title sorting for Unicode numeric characters such as superscript ² by treating only ASCII 0–9 groups as numeric sort tokens.'),
         ('v2.9.6.1', 'Fixed SQLite sorting failure caused by the NATURAL collation name being parsed as SQL syntax; the custom collation is now quoted correctly.'),
         ('v2.9.6', 'Added Plex account sign-in and private personal play-history/stats, sortable Movies/TV columns with natural and numeric ordering, popularity period filters, and clearer Played Count terminology.'),
@@ -3021,6 +3021,124 @@ def settings():
     backup={'enabled':setting('backup_auto_enabled','0')=='1','path':setting('backup_path',''),'time':setting('backup_time','02:00'),'keep':setting('backup_keep','14'),'last_success':setting('backup_last_success','Never'),'running':BACKUP_STATUS.get('running',False),'error':BACKUP_STATUS.get('error')}
     discord={'enabled':setting('discord_auto_enabled','0')=='1','webhook':bool(setting('discord_webhook_url')),'frequency':setting('discord_frequency','weekly'),'time':setting('discord_post_time','19:00'),'weekday':setting('discord_weekday','4'),'cooldown':setting('discord_cooldown_days','90'),'stats_days':setting('discord_stats_days','30'),'categories':set(setting('discord_categories','popular_movie,popular_tv,viewing_hours,storage_hog,forgotten,movie_recommendation,tv_recommendation').split(',')),'movie_webhook':bool(setting('discord_movie_webhook_url')),'tv_webhook':bool(setting('discord_tv_webhook_url')),'last_post':setting('discord_last_post','Never'),'last_error':setting('discord_last_error',''),'leaving_days':setting('leaving_soon_days','14'),'bot_enabled':setting('discord_bot_enabled','0')=='1','bot_token':bool(setting('discord_bot_token')),'bot_guild_id':setting('discord_bot_guild_id',''),'bot_ephemeral':setting('discord_bot_ephemeral','1')=='1','bot_status':dict(DISCORD_BOT_STATUS)}
     return render_template('settings.html',db=get_db_path(),protected=p,cache=cache_meta(),kuma=kuma,integrations=integrations,tautulli=tautulli,backup=backup,security=security,discord=discord,plex_update=plex_update,plex_connection=plex_connection)
+
+
+# --- v2.9.20 FileFlows read-only dashboard ---------------------------------
+def _fileflows_db_path():
+    explicit=(os.environ.get('FILEFLOWS_DB') or setting('fileflows_db','')).strip()
+    if explicit:
+        return os.path.expandvars(os.path.expanduser(explicit))
+    if os.name=='nt':
+        appdata=os.environ.get('APPDATA','')
+        if appdata:
+            return os.path.join(appdata,'FileFlows','Data','FileFlows.sqlite')
+    return '/fileflows/FileFlows.sqlite'
+
+def _fileflows_conn():
+    path=_fileflows_db_path()
+    uri='file:'+os.path.abspath(path).replace('\\','/')+'?mode=ro'
+    c=sqlite3.connect(uri,uri=True,timeout=3)
+    c.row_factory=sqlite3.Row
+    c.execute('pragma query_only=ON')
+    return c
+
+def _ff_dt(value):
+    if not value or str(value).startswith('1970-01-01'): return None
+    try: return datetime.fromisoformat(str(value).replace('Z','+00:00')).replace(tzinfo=None)
+    except Exception: return None
+
+def _ff_file_name(path):
+    return re.split(r'[\\/]',path or '')[-1] or path or 'Unknown file'
+
+def _ff_duration_filter(seconds):
+    try: seconds=max(0,int(seconds or 0))
+    except Exception: return '—'
+    if seconds < 60: return f'{seconds}s'
+    minutes=seconds//60
+    if minutes < 60: return f'{minutes}m'
+    hours,minutes=divmod(minutes,60)
+    if hours < 24: return f'{hours}h {minutes}m'
+    days,hours=divmod(hours,24)
+    return f'{days}d {hours}h'
+
+def _ff_filesize_filter(value):
+    try: n=float(value or 0)
+    except Exception: return '—'
+    sign='-' if n < 0 else ''
+    n=abs(n)
+    units=['B','KB','MB','GB','TB','PB']
+    for unit in units:
+        if n < 1024 or unit==units[-1]:
+            if unit=='B': return f'{sign}{int(n)} {unit}'
+            return f'{sign}{n:.1f} {unit}'
+        n/=1024
+    return f'{sign}{n:.1f} PB'
+
+app.jinja_env.filters['filesize']=_ff_filesize_filter
+app.jinja_env.filters['duration']=_ff_duration_filter
+
+def _fileflows_dashboard():
+    path=_fileflows_db_path()
+    result={'db_path':path,'error':'','version':'','snapshot_time':datetime.now().strftime('%d %b %Y %H:%M'),
+            'summary':{'processing':0,'processed':0,'problems':0,'saved':0},
+            'periods':{'today':{'count':0,'saved':0,'duration':0},'week':{'count':0,'saved':0,'duration':0},'all':{'count':0,'saved':0,'duration':0}},
+            'current':[],'recent':[],'failures':[],'libraries':[]}
+    try:
+        c=_fileflows_conn()
+        tables={r[0] for r in c.execute("select name from sqlite_master where type='table'")}
+        if 'LibraryFile' not in tables: raise RuntimeError('LibraryFile table was not found.')
+        row=c.execute('select Version from FileFlows limit 1').fetchone() if 'FileFlows' in tables else None
+        result['version']=(row[0] if row else '') or 'Unknown'
+        counts={int(r['Status']):int(r['n']) for r in c.execute('select Status,count(*) n from LibraryFile where IsDirectory=0 group by Status')}
+        result['summary'].update(processing=counts.get(2,0),processed=counts.get(1,0),problems=counts.get(4,0))
+        totals=c.execute('select coalesce(sum(OriginalSize),0) o,coalesce(sum(FinalSize),0) f from LibraryFile where IsDirectory=0 and Status=1').fetchone()
+        result['summary']['saved']=int(totals['o'] or 0)-int(totals['f'] or 0)
+
+        now=datetime.now(); today=now.replace(hour=0,minute=0,second=0,microsecond=0); week=now-timedelta(days=7)
+        completed=c.execute("""select Name,LibraryName,FlowName,OriginalSize,FinalSize,ProcessingStarted,ProcessingEnded
+                               from LibraryFile where IsDirectory=0 and Status=1 and ProcessingEnded>'1971-01-01'
+                               order by ProcessingEnded desc""").fetchall()
+        for r in completed:
+            ended=_ff_dt(r['ProcessingEnded']); started=_ff_dt(r['ProcessingStarted'])
+            saved=int(r['OriginalSize'] or 0)-int(r['FinalSize'] or 0)
+            duration=max(0,int((ended-started).total_seconds())) if ended and started else 0
+            result['periods']['all']['duration']+=duration
+            if ended and ended>=week:
+                result['periods']['week']['count']+=1; result['periods']['week']['saved']+=saved; result['periods']['week']['duration']+=duration
+            if ended and ended>=today:
+                result['periods']['today']['count']+=1; result['periods']['today']['saved']+=saved; result['periods']['today']['duration']+=duration
+        result['periods']['all']['count']=result['summary']['processed']; result['periods']['all']['saved']=result['summary']['saved']
+
+        for r in c.execute("""select Name,LibraryName,FlowName,ProcessingStarted from LibraryFile
+                              where IsDirectory=0 and Status=2 order by ProcessingStarted asc limit 12"""):
+            started=_ff_dt(r['ProcessingStarted'])
+            result['current'].append({'name':_ff_file_name(r['Name']),'path':r['Name'],'library':r['LibraryName'] or 'Unknown library',
+                                      'flow':r['FlowName'] or '','started':started.strftime('%H:%M') if started else '—',
+                                      'elapsed':int((now-started).total_seconds()) if started else 0})
+        for r in completed[:15]:
+            ended=_ff_dt(r['ProcessingEnded']); original=int(r['OriginalSize'] or 0); final=int(r['FinalSize'] or 0)
+            result['recent'].append({'name':_ff_file_name(r['Name']),'path':r['Name'],'library':r['LibraryName'] or 'Unknown library',
+                                     'ended':ended.strftime('%d %b %H:%M') if ended else '—','original':original,'final':final,'saved':original-final})
+        for r in c.execute("""select Name,LibraryName,FailureReason,DateModified from LibraryFile
+                              where IsDirectory=0 and Status=4 order by DateModified desc limit 10"""):
+            when=_ff_dt(r['DateModified'])
+            result['failures'].append({'name':_ff_file_name(r['Name']),'path':r['Name'],'library':r['LibraryName'] or 'Unknown library',
+                                       'reason':r['FailureReason'] or '','when':when.strftime('%d %b %H:%M') if when else '—'})
+        for r in c.execute("""select coalesce(nullif(LibraryName,''),'Unknown') name,count(*) n,
+                                     coalesce(sum(OriginalSize),0) o,coalesce(sum(FinalSize),0) f
+                              from LibraryFile where IsDirectory=0 and Status=1 group by LibraryName order by (sum(OriginalSize)-sum(FinalSize)) desc"""):
+            result['libraries'].append({'name':r['name'],'count':int(r['n']),'original':int(r['o'] or 0),'final':int(r['f'] or 0),
+                                        'saved':int(r['o'] or 0)-int(r['f'] or 0)})
+        c.close()
+    except Exception as e:
+        result['error']=f'{type(e).__name__}: {e}'
+    return result
+
+@app.get('/file-processing')
+def file_processing():
+    return render_template('fileflows.html', **_fileflows_dashboard())
+# --- end FileFlows dashboard ------------------------------------------------
+
 
 if __name__=='__main__':
     cleanup_plex_snapshots()

@@ -1,0 +1,94 @@
+{% extends 'base.html' %}{% block content %}
+<section class="mc-page-hero mb-4">
+  <img src="/static/mascots/server-card.png" alt="" aria-hidden="true">
+  <h1>File Processing</h1>
+  <p>A fast, read-only view of FileFlows processing, storage savings and recent results.</p>
+</section>
+
+{% if error %}
+<div class="alert alert-warning">
+  <strong>FileFlows data unavailable.</strong> {{ error }}
+  {% if is_admin() %}<div class="small mt-2">Database path: <code>{{ db_path }}</code></div>{% endif %}
+</div>
+{% else %}
+<div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-3">
+  <div class="small text-secondary">FileFlows {{ version }} · snapshot {{ snapshot_time }}</div>
+  <div class="small text-secondary">Read-only database access</div>
+</div>
+
+<div class="row g-3 mb-4">
+  <div class="col-6 col-xl-3"><div class="card p-3 h-100 mc-ff-stat"><span>Processing now</span><strong>{{ summary.processing }}</strong></div></div>
+  <div class="col-6 col-xl-3"><div class="card p-3 h-100 mc-ff-stat"><span>Processed</span><strong>{{ "{:,}".format(summary.processed) }}</strong></div></div>
+  <div class="col-6 col-xl-3"><div class="card p-3 h-100 mc-ff-stat"><span>Problems</span><strong>{{ summary.problems }}</strong></div></div>
+  <div class="col-6 col-xl-3"><div class="card p-3 h-100 mc-ff-stat"><span>Space saved</span><strong>{{ summary.saved|filesize }}</strong></div></div>
+</div>
+
+<div class="row g-3 mb-4">
+  <div class="col-md-4"><div class="card p-3 h-100 mc-ff-period"><span>Today</span><strong>{{ periods.today.count }} files</strong><small>{{ periods.today.saved|filesize }} saved · {{ periods.today.duration|duration }}</small></div></div>
+  <div class="col-md-4"><div class="card p-3 h-100 mc-ff-period"><span>Last 7 days</span><strong>{{ periods.week.count }} files</strong><small>{{ periods.week.saved|filesize }} saved · {{ periods.week.duration|duration }}</small></div></div>
+  <div class="col-md-4"><div class="card p-3 h-100 mc-ff-period"><span>All time</span><strong>{{ "{:,}".format(summary.processed) }} files</strong><small>{{ summary.saved|filesize }} saved · {{ periods.all.duration|duration }}</small></div></div>
+</div>
+
+{% if current %}
+<div class="card p-3 mb-4">
+  <div class="d-flex justify-content-between align-items-center mb-3"><h5 class="mb-0">Currently Processing</h5><span class="badge text-bg-success">{{ current|length }} active</span></div>
+  <div class="mc-ff-list">
+    {% for item in current %}
+    <div class="mc-ff-row">
+      <div class="mc-ff-main"><strong title="{{ item.path }}">{{ item.name }}</strong><span>{{ item.library }}{% if item.flow %} · {{ item.flow }}{% endif %}</span></div>
+      <div class="mc-ff-side"><span>Started {{ item.started }}</span><small>{{ item.elapsed|duration }}</small></div>
+    </div>
+    {% endfor %}
+  </div>
+</div>
+{% endif %}
+
+<div class="row g-3 mb-4">
+  <div class="col-xl-8">
+    <div class="card p-3 h-100">
+      <h5 class="mb-3">Recently Processed</h5>
+      {% if recent %}
+      <div class="mc-ff-list">
+        {% for item in recent %}
+        <div class="mc-ff-row">
+          <div class="mc-ff-main"><strong title="{{ item.path }}">{{ item.name }}</strong><span>{{ item.library }} · {{ item.ended }}</span></div>
+          <div class="mc-ff-side"><span>{{ item.original|filesize }} → {{ item.final|filesize }}</span><small class="{% if item.saved > 0 %}text-success{% elif item.saved < 0 %}text-warning{% endif %}">{% if item.saved >= 0 %}Saved {{ item.saved|filesize }}{% else %}Grew {{ (-item.saved)|filesize }}{% endif %}</small></div>
+        </div>
+        {% endfor %}
+      </div>
+      {% else %}<div class="text-secondary">No completed processing records found.</div>{% endif %}
+    </div>
+  </div>
+  <div class="col-xl-4">
+    <div class="card p-3 h-100">
+      <h5 class="mb-3">Recent Problems</h5>
+      {% if failures %}
+      <div class="mc-ff-list">
+        {% for item in failures %}
+        <div class="mc-ff-problem">
+          <strong title="{{ item.path }}">{{ item.name }}</strong>
+          <span>{{ item.library }} · {{ item.when }}</span>
+          <small>{{ item.reason or 'FileFlows reported a processing problem.' }}</small>
+        </div>
+        {% endfor %}
+      </div>
+      {% else %}<div class="text-secondary">No problem records found.</div>{% endif %}
+    </div>
+  </div>
+</div>
+
+<div class="card p-3 mb-4">
+  <h5 class="mb-3">Savings by Library</h5>
+  <div class="table-responsive">
+    <table class="table align-middle mb-0">
+      <thead><tr><th>Library</th><th class="text-end">Processed</th><th class="text-end">Original</th><th class="text-end">Final</th><th class="text-end">Saved</th></tr></thead>
+      <tbody>
+      {% for lib in libraries %}
+      <tr><td>{{ lib.name }}</td><td class="text-end">{{ "{:,}".format(lib.count) }}</td><td class="text-end">{{ lib.original|filesize }}</td><td class="text-end">{{ lib.final|filesize }}</td><td class="text-end fw-semibold">{{ lib.saved|filesize }}</td></tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endif %}
+{% endblock %}
