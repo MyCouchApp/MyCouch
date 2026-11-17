@@ -2885,6 +2885,8 @@ def leaving_soon_settings():
 @app.get('/changelog')
 def changelog():
     versions = [
+        ('v2.9.20', 'File Processing: read-only FileFlows processing, processed totals, problems and reported space savings; refreshed Services dashboard with status cards and icons; interface and encoding fixes.'),
+        ('v2.9.19.2', 'Services: Uptime Kuma status and response-time dashboard, settings connection test, periodic refresh and reorganised navigation.'),
         ('v2.9.19.1', 'Smart Search can now create named Smart Playlists and optionally sync them to Plex. Synced Smart Lists automatically reconcile after Plex cache refreshes, with Sync Now and Stop Syncing controls.'),
         ('v2.9.19', 'My Playlists: discovers all Plex video playlists for the signed-in user, lets titles be added to an existing or newly named playlist, and adds personal Smart Lists built from the local MyCouch cache.'),
         ('v2.9.18.8', 'My Playlist inside MyCouch: adds a dedicated MyCouch Picks page with movie and TV artwork, details, hover previews, remove controls and a random pick action while keeping Plex as the source of truth.'),
