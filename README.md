@@ -1,8 +1,8 @@
 # 🛋️ MyCouch
 
-**Current release: v2.9.19.2**
+**Current release: v2.9.20**
 
-v2.9.19.2 adds an Uptime Kuma-powered Services page and reorganises the sidebar into clearer Home, Discover, Library, Status and Admin sections.
+v2.9.20 adds a read-only FileFlows processing dashboard and refreshes the Uptime Kuma Services interface.
 
 <img src="static/mycouch-github.png" alt="MyCouch couch mascot" width="180">
 
@@ -12,7 +12,14 @@ MyCouch is a self-hosted companion for exploring and understanding a Plex media 
 
 > MyCouch is an independent project and is not affiliated with Plex, Tautulli, Radarr, Sonarr, Discord, Emby or Jellyfin.
 
-## Current release — v2.9.19.2
+## Current release — v2.9.20
+
+### v2.9.20 — File Processing & Services dashboard
+
+- Adds **File Processing**, a read-only FileFlows dashboard showing processing jobs, processed files, problems and reported space savings.
+- Reads the configured FileFlows SQLite database without modifying FileFlows records.
+- Refreshes the **Services** dashboard with status cards and service icons.
+- Includes interface polish and source-encoding fixes.
 
 ### v2.9.19.2 — Services & Navigation
 
