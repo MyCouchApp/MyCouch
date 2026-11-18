@@ -9,17 +9,45 @@
     <div><h5 class="mb-1">Local library cache</h5><p class="text-muted mb-0">{% if cache %}Last refreshed: <b>{{cache.refreshed_at}}</b><br>{{cache.movie_files}} movie files · {{cache.tv_shows}} TV shows · {{cache.episodes}} episodes{% else %}Not built yet.{% endif %}</p></div>
     <form method="post" action="/refresh-cache" id="refreshForm"><input type="hidden" name="_csrf" value="{{csrf_token()}}"><button class="btn btn-success" type="submit" id="refreshBtn">Update Plex Now</button></form>
   </div>
+  <div class="border-top mt-3 pt-3">
+    <h6 class="mb-2">Plex Backup Status</h6>
+
+    {% if cache and cache.source_db %}
+      <div class="small mb-2">
+        <span class="text-muted">Backup in use:</span>
+        <strong class="font-monospace">
+          {{ cache.source_db.split('/')[-1].split('\\')[-1] }}
+        </strong>
+      </div>
+
+      <div class="small mb-2">
+        <span class="text-muted">Last successful refresh:</span>
+        <strong>{{ cache.refreshed_at }}</strong>
+      </div>
+    {% else %}
+      <p class="small text-muted mb-2">
+        No Plex backup has been cached yet.
+      </p>
+    {% endif %}
+
+    <div class="small">
+      <span class="text-muted">Backup status:</span>
+      <span id="plexBackupStatus" class="fw-semibold">
+        Checking...
+      </span>
+    </div>
+  </div>
   <div id="buildPanel" class="build-panel mt-3 d-none settings-progress-panel">
     <div class="d-flex justify-content-between"><strong id="buildStage">Starting…</strong><span id="buildPct">0%</span></div>
     <div class="progress mt-2" role="progressbar"><div id="buildBar" class="progress-bar progress-bar-striped progress-bar-animated" style="width:0%"></div></div>
     <div class="d-flex justify-content-between mt-2 small text-muted"><span id="buildMessage">Preparing cache build…</span><span>Elapsed: <span id="buildElapsed">00:00</span></span></div>
   </div>
-  <small class="text-muted mt-2">Refresh creates a consistent SQLite snapshot of the selected Plex database (including a live Plex DB), then atomically rebuilds auditor-cache.db. The current cache stays intact if refresh fails.</small>
+  <small class="text-muted mt-2">Refresh automatically selects the newest valid Plex database backup from the NAS, creates a safe SQLite snapshot, and atomically rebuilds the local library cache. If the NAS is unavailable or the refresh fails, the existing cache remains intact.</small>
 </div>
 
 <div class="card p-3 mb-4"><h5>Plex connection for Discord</h5><p class="text-muted">Optional. Enables poster thumbnails and token-free <b>Open in Plex</b> links in title-based Discord posts. The Plex token stays in local <code>auditor.db</code> and is never placed in Discord URLs.</p><form method="post" action="/plex/connection" class="row g-3"><input type="hidden" name="_csrf" value="{{csrf_token()}}"><div class="col-md-6"><label class="form-label">Plex URL</label><input class="form-control" name="plex_url" value="{{plex_connection.url}}"></div><div class="col-md-6"><label class="form-label">Plex token</label><input class="form-control" type="password" name="plex_token" placeholder="{{'Saved — leave blank to keep' if plex_connection.token else 'Enter locally'}}"></div><div class="col-12"><button class="btn btn-primary">Save & Test Plex</button> <span class="small text-muted ms-2">Server identity: {{'Detected ✓' if plex_connection.machine else 'Not detected'}}</span></div></form></div>
 
-<div class="card p-3 mb-4"><h5>Plex automatic updates</h5><p class="text-muted">Use the live Plex database safely: each update snapshots SQLite first, then rebuilds the Auditor cache. The website never browses the active Plex DB directly.</p><form method="post" action="/plex/schedule" class="row g-3 align-items-end"><input type="hidden" name="_csrf" value="{{csrf_token()}}"><div class="col-md-3"><div class="form-check form-switch mt-4"><input class="form-check-input" type="checkbox" name="enabled" value="1" id="plexAuto" {% if plex_update.enabled %}checked{% endif %}><label class="form-check-label" for="plexAuto">Enable automatic updates</label></div></div><div class="col-md-3"><label class="form-label">Frequency</label><select class="form-select" name="frequency"><option value="daily" {% if plex_update.frequency=='daily' %}selected{% endif %}>Daily</option><option value="6h" {% if plex_update.frequency=='6h' %}selected{% endif %}>Every 6 hours</option><option value="12h" {% if plex_update.frequency=='12h' %}selected{% endif %}>Every 12 hours</option></select></div><div class="col-md-3"><label class="form-label">Daily time</label><input class="form-control" type="time" name="time" value="{{plex_update.time}}"></div><div class="col-md-3"><button class="btn btn-primary w-100">Save schedule</button></div></form></div>
+<div class="card p-3 mb-4"><h5>Plex automatic updates</h5><p class="text-muted">MyCouch checks the NAS for newer Plex database backups on the selected schedule. The library cache is refreshed only when a newer backup is available. Manual updates can still be triggered using Update Plex Now.</p><form method="post" action="/plex/schedule" class="row g-3 align-items-end"><input type="hidden" name="_csrf" value="{{csrf_token()}}"><div class="col-md-3"><div class="form-check form-switch mt-4"><input class="form-check-input" type="checkbox" name="enabled" value="1" id="plexAuto" {% if plex_update.enabled %}checked{% endif %}><label class="form-check-label" for="plexAuto">Enable automatic updates</label></div></div><div class="col-md-3"><label class="form-label">Frequency</label><select class="form-select" name="frequency"><option value="daily" {% if plex_update.frequency=='daily' %}selected{% endif %}>Daily</option><option value="6h" {% if plex_update.frequency=='6h' %}selected{% endif %}>Every 6 hours</option><option value="12h" {% if plex_update.frequency=='12h' %}selected{% endif %}>Every 12 hours</option></select></div><div class="col-md-3"><label class="form-label">Daily time</label><input class="form-control" type="time" name="time" value="{{plex_update.time}}"></div><div class="col-md-3"><button class="btn btn-primary w-100">Save schedule</button></div></form></div>
 
 <div class="card p-3 mb-4">
   <div class="d-flex justify-content-between align-items-center gap-3">
@@ -169,6 +197,46 @@
 
 <h4>Protected titles</h4><table class="table"><thead><tr><th>Type</th><th>Title</th><th></th></tr></thead><tbody>{% for r in protected %}<tr><td>{{r.kind}}</td><td>{{r.title}}</td><td><form method="post" action="/protect"><input type="hidden" name="_csrf" value="{{csrf_token()}}"><input type="hidden" name="kind" value="{{r.kind}}"><input type="hidden" name="title" value="{{r.title}}"><input type="hidden" name="action" value="unprotect"><button class="btn btn-sm btn-outline-danger">Remove</button></form></td></tr>{% endfor %}</tbody></table><p><b>Built-in:</b> Star Trek: The Next Generation is protected. All TV ≥2000px high is excluded from TV cleanup analysis.</p>
 <script>
+async function checkPlexBackupStatus() {
+    const el = document.getElementById('plexBackupStatus');
+    if (!el) return;
+
+    try {
+        const response = await fetch('/api/plex-backup-status', {
+            cache: 'no-store'
+        });
+
+        if (!response.ok) {
+            throw new Error('HTTP ' + response.status);
+        }
+
+        const data = await response.json();
+
+        const statuses = {
+            current: ['Up to date', 'text-success'],
+            update_available: ['New backup available', 'text-warning'],
+            unavailable: ['NAS backup unavailable', 'text-danger'],
+            manual: ['Manual database mode', 'text-muted']
+        };
+
+        const [message, cssClass] =
+            statuses[data.status] || ['Status unknown', 'text-muted'];
+
+        el.textContent = data.message || message;
+        el.className = 'fw-semibold ' + cssClass;
+
+        if (data.latest_backup) {
+            el.title = 'Latest NAS backup: ' + data.latest_backup;
+        }
+
+    } catch (error) {
+        el.textContent = 'Unable to check backup status';
+        el.className = 'fw-semibold text-danger';
+        console.error('Plex backup status check failed:', error);
+    }
+}
+
+checkPlexBackupStatus();
 const panel=document.getElementById('buildPanel'), btn=document.getElementById('refreshBtn');
 function fmt(sec){sec=Math.floor(sec||0);return String(Math.floor(sec/60)).padStart(2,'0')+':'+String(sec%60).padStart(2,'0')}
 async function poll(){try{const r=await fetch('/api/cache-status',{cache:'no-store'}),s=await r.json();if(s.running||s.complete||s.error){panel.classList.remove('d-none');document.getElementById('buildStage').textContent=s.stage;document.getElementById('buildPct').textContent=s.percent+'%';document.getElementById('buildBar').style.width=s.percent+'%';document.getElementById('buildMessage').textContent=s.message||'';document.getElementById('buildElapsed').textContent=fmt(s.elapsed);btn.disabled=!!s.running;btn.textContent=s.running?'Updating Plex…':'Update Plex Now';if(s.error){document.getElementById('buildBar').classList.add('bg-danger');}if(s.complete){

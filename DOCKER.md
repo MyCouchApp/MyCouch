@@ -1,64 +1,151 @@
 # MyCouch on Docker
 
-MyCouch can run on the Docker laptop with its application state persisted in `./data`.
+MyCouch runs in Docker using the Waitress production server.
 
-## Important: Plex database access
+Application data is stored in `./data`, preserving configuration, sessions and the library cache across container replacements.
 
-MyCouch still needs read access to the Plex SQLite library database when you run **Update Plex Now**. The container cannot use the old Windows `C:\...` database path.
+## Requirements
 
-Expose or copy the Plex database folder to the Docker laptop, then mount it read-only into the container. For example:
+- Docker Engine and Docker Compose
+- Access to a Plex library database or completed Plex database backups
+- A persistent directory for MyCouch application data
 
-```yaml
-volumes:
-  - ./data:/app/data
-  - /mnt/plex-db:/plex-db:ro
-environment:
-  PLEX_DB: /plex-db/com.plexapp.plugins.library.db
-```
-
-Use the actual mounted path and Plex database filename on your system.
-
-## First test
+## Quick start
 
 ```sh
-mkdir -p /srv/mycouch
-cd /srv/mycouch
-# extract/copy the MyCouch release here
+git clone https://github.com/MyCouchApp/MyCouch.git
+cd MyCouch
 mkdir -p data
 docker compose up -d --build
-docker compose logs -f mycouch
 ```
 
-Open `http://192.168.1.200:8090`.
+Open `http://localhost:8090`.
 
-## Migrating your existing MyCouch state
+The default Compose file starts MyCouch but does not mount a Plex database. Configure one of the options below before refreshing the library.
 
-Stop the Windows MyCouch instance first, then copy these files from the existing MyCouch folder into `/srv/mycouch/data/`:
+## Recommended: Automatic Plex backup discovery
+
+Mount a directory containing completed Plex database backups read-only.
+
+Create `docker-compose.override.yml`:
+
+```yaml
+services:
+  mycouch:
+    environment:
+      PLEX_BACKUP_DIR: /plex-backups
+    volumes:
+      - "/path/to/your/PlexBackup:/plex-backups:ro"
+```
+
+Replace `/path/to/your/PlexBackup` with the actual directory on your Docker host.
+
+MyCouch recognises dated Plex library backups such as:
+
+```text
+com.plexapp.plugins.library.db-2026-11-16
+```
+
+It selects the newest valid backup, ignoring Plex blobs databases and incomplete or unsuitable candidates.
+
+The backup directory must already be mounted and accessible on the Docker host. MyCouch does not mount NAS shares automatically.
+
+### Automatic refresh
+
+In Admin Settings, enable Plex automatic updates and select:
+
+- Every 6 hours
+- Every 12 hours
+- Daily
+
+Scheduled checks refresh the local library cache only when the selected backup differs from the cached source.
+
+**Update Plex Now** forces a manual refresh.
+
+The Admin page displays the backup currently in use, the last successful cache refresh and the latest backup status.
+
+If the NAS becomes unavailable or a refresh fails, the existing completed cache remains intact.
+
+## Alternative: Read-only Plex database
+
+If you are not using dated NAS backups, mount a Plex database directory instead:
+
+```yaml
+services:
+  mycouch:
+    environment:
+      PLEX_DB: /plex-db/com.plexapp.plugins.library.db
+      PLEX_BACKUP_DIR: ""
+    volumes:
+      - "/path/to/plex/database:/plex-db:ro"
+```
+
+Replace the host path with the actual Plex database directory.
+
+MyCouch uses a temporary SQLite snapshot when rebuilding the cache. It does not write changes to the source database.
+
+In this mode, scheduled refreshes do not use NAS backup change detection.
+
+## Local Docker configuration
+
+Keep machine-specific paths, port mappings and environment settings in `docker-compose.override.yml`.
+
+This file is excluded from Git.
+
+For example, to publish MyCouch on host port 8088 instead of 8090:
+
+```yaml
+services:
+  mycouch:
+    ports: !override
+      - "8088:8090"
+```
+
+The `!override` directive requires Docker Compose 2.24.4 or newer.
+
+Check the merged configuration before deployment:
+
+```sh
+docker compose config
+```
+
+## Migrating existing MyCouch data
+
+Stop the previous MyCouch instance before copying its application state.
+
+Copy the following files into the new installation's `data/` directory:
 
 - `auditor.db`
 - `auditor-cache.db`
 - `.pla-secret`
 
-Keeping `.pla-secret` preserves the Flask/session signing secret. The SQLite databases retain your MyCouch configuration, cache, settings, integrations, playlists, security activity, Kuma settings, etc.
+Preserving the existing secret maintains compatibility with previously signed sessions.
 
-After copying them:
+The databases retain MyCouch configuration and cached information.
+
+## Updating MyCouch
 
 ```sh
-cd /srv/mycouch
+git pull
 docker compose up -d --build
-docker compose logs -f mycouch
+docker compose ps
 ```
 
-## URLs after migration
+## Troubleshooting
 
-Because MyCouch is then running on the Docker laptop, local service integrations should use addresses reachable from the container. Do not use `localhost` for Plex, Tautulli, Radarr or Sonarr unless that service is inside the same container.
+Check container health and logs:
 
-For this environment the expected addresses include:
+```sh
+docker compose ps
+docker compose logs --tail=100 mycouch
+```
 
-- Plex: `http://192.168.1.10:32400`
-- Tautulli: `http://192.168.1.200:8181`
-- Uptime Kuma: `http://192.168.1.200:3001`
-- Radarr: `http://192.168.1.10:7878`
-- Sonarr: `http://192.168.1.10:7879`
+Verify the backup directory is visible inside the container:
 
-Your Cloudflare Tunnel can then be changed from the Windows MyCouch origin to `http://192.168.1.200:8090` after the Docker copy is confirmed working.
+```sh
+docker compose exec mycouch ls -lh /plex-backups
+```
+
+For installations using a manually mounted Plex database, check `/plex-db` instead.
+
+The source database and NAS backups should always be mounted read-only.

@@ -3,16 +3,15 @@ services:
     build: .
     container_name: mycouch
     restart: unless-stopped
+    command: ["python", "production.py"]
     ports:
-      - "8090:8090"
+      - "${MYCOUCH_HOST_PORT:-8090}:8090"
     environment:
-      TZ: Pacific/Auckland
+      TZ: "${TZ:-UTC}"
       PORT: "8090"
       MYCOUCH_DATA_DIR: /app/data
       MYCOUCH_SECURE_COOKIE: "1"
-      # Set this after mounting the Plex database into the container:
-      # PLEX_DB: /plex-db/com.plexapp.plugins.library.db
+      PLEX_DB: /plex-db/com.plexapp.plugins.library.db
+      PLEX_BACKUP_DIR: "${PLEX_BACKUP_DIR:-}"
     volumes:
       - ./data:/app/data
-      # Example: mount a read-only folder containing the Plex SQLite database.
-      # - /mnt/plex-db:/plex-db:ro

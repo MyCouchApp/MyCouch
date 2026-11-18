@@ -12,3 +12,17 @@ backups
 logs
 plex-snapshot-*
 data/*
+# Local Docker configuration
+docker-compose.override.yml
+
+# Local recovery files
+*.bak
+*.bak-*
+
+# Additional secrets and environment files
+.mycouch-secret
+.env.*
+!.env.example
+
+# Runtime data
+data/

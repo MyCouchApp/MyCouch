@@ -1,8 +1,8 @@
 # 🛋️ MyCouch
 
-**Current release: v2.9.20**
+**Current release: v2.9.21**
 
-v2.9.20 adds a read-only FileFlows processing dashboard and refreshes the Uptime Kuma Services interface.
+v2.9.21 introduces automatic Plex NAS backup discovery, safer library cache refreshes, backup status monitoring and improved Docker deployment with Waitress.
 
 <img src="static/mycouch-github.png" alt="MyCouch couch mascot" width="180">
 
@@ -12,7 +12,18 @@ MyCouch is a self-hosted companion for exploring and understanding a Plex media 
 
 > MyCouch is an independent project and is not affiliated with Plex, Tautulli, Radarr, Sonarr, Discord, Emby or Jellyfin.
 
-## Current release — v2.9.20
+## Current release — v2.9.21
+
+### v2.9.21 — Automatic Plex Backup Management
+
+- Automatically discovers the newest valid dated Plex database backup from a configured NAS directory.
+- Uses read-only SQLite access and a local snapshot to safely rebuild the MyCouch library cache.
+- Skips scheduled cache refreshes when the selected backup has not changed.
+- Preserves the existing library cache if a backup is unavailable or a refresh fails.
+- Adds backup monitoring to **Admin Settings**, showing the selected backup, last successful refresh and current backup status.
+- Retains **Update Plex Now** for manually triggered cache refreshes.
+- Adds Waitress production serving and portable Docker Compose configuration.
+- Supports machine-specific Docker overrides without committing local NAS paths.
 
 ### v2.9.20 — File Processing & Services dashboard
 
@@ -302,4 +313,17 @@ MyCouch Picks is now available as a shared movie and TV action across title page
 
 ## Docker
 
-MyCouch now includes a `Dockerfile` and `docker-compose.yml`. Runtime state is stored in `/app/data` so `auditor.db`, `auditor-cache.db` and `.pla-secret` survive container replacement. Plex's SQLite library database must be mounted read-only into the container for library refreshes. See `DOCKER.md` for migration instructions.
+MyCouch includes Docker support using the Waitress production server.
+
+Application state is persisted in `/app/data`, including `auditor.db`, `auditor-cache.db` and `.pla-secret`.
+
+For Plex library refreshes, MyCouch supports two read-only data sources:
+
+- **Automatic Plex backup discovery (recommended):** Mount a directory containing dated Plex database backups and configure `PLEX_BACKUP_DIR`.
+- **Direct Plex database access:** Mount a Plex SQLite database directory and configure `PLEX_DB`.
+
+Automatic backup discovery selects the newest valid backup. Scheduled refreshes skip unchanged backups, and failed refreshes preserve the existing library cache.
+
+The Docker Compose configuration supports local overrides for NAS mounts, ports and environment settings.
+
+See [DOCKER.md](DOCKER.md) for installation, configuration, migration and troubleshooting instructions.

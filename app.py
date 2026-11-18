@@ -26,7 +26,7 @@ def _app_secret():
 app=Flask(__name__); app.secret_key=_app_secret()
 app.config.update(SESSION_COOKIE_HTTPONLY=True,SESSION_COOKIE_SAMESITE='Lax',SESSION_COOKIE_SECURE=(os.environ.get('MYCOUCH_SECURE_COOKIE') or os.environ.get('PLA_SECURE_COOKIE','0'))=='1',PERMANENT_SESSION_LIFETIME=timedelta(days=30))
 BUILD_LOCK=threading.Lock()
-APP_VERSION='2.9.20'
+APP_VERSION='2.9.21'
 PLEX_UPDATE_STATUS={'running':False,'last_update':None,'error':None}
 SMART_LOCK=threading.Lock(); SMART_MODEL=None; SMART_VECTORS=None; SMART_IDS=None
 BUILD_STATUS={'running':False,'stage':'Idle','percent':0,'current':0,'total':0,'message':'','started_at':None,'elapsed':0,'error':None,'complete':False}
@@ -45,6 +45,117 @@ CACHE_DB=os.path.join(DATA_DIR,'auditor-cache.db')
 def get_db_path():
     c=config(); row=c.execute("select value from settings where key='plex_db'").fetchone(); c.close()
     return row['value'] if row and row['value'] else DEFAULT_DB_PATH
+
+def discover_plex_backup():
+    """Find the newest stable, readable Plex library backup."""
+    backup_dir = os.environ.get('PLEX_BACKUP_DIR', '').strip()
+
+    if not backup_dir:
+        return None
+
+    if not os.path.isdir(backup_dir):
+        raise RuntimeError(
+            f"Plex backup directory unavailable: {backup_dir}"
+        )
+
+    pattern = re.compile(
+        r'^com\.plexapp\.plugins\.library\.db-(\d{4}-\d{2}-\d{2})$'
+    )
+
+    candidates = []
+
+    for name in os.listdir(backup_dir):
+        match = pattern.fullmatch(name)
+        if not match:
+            continue
+
+        try:
+            datetime.strptime(match.group(1), '%Y-%m-%d')
+            path = os.path.join(backup_dir, name)
+            stat = os.stat(path)
+
+            # Ignore empty or recently modified files.
+            if stat.st_size == 0:
+                continue
+            if time.time() - stat.st_mtime < 3600:
+                continue
+
+            candidates.append((match.group(1), path))
+
+        except (OSError, ValueError):
+            continue
+
+    candidates.sort(reverse=True)
+
+    for date, path in candidates:
+        try:
+            before = os.stat(path)
+
+            uri = (
+                'file:' + quote(os.path.abspath(path), safe='/')
+                + '?mode=ro&immutable=1'
+            )
+
+            with sqlite3.connect(uri, uri=True, timeout=30) as db:
+
+                # Plex uses custom SQLite tokenizers that prevent
+                # standard Python SQLite from running quick_check.
+                # Validate essential tables using readable records.
+                required_tables = (
+                    'library_sections',
+                    'metadata_items',
+                    'media_items',
+                    'media_parts'
+                )
+
+                for table in required_tables:
+                    count = db.execute(
+                        f'SELECT COUNT(*) FROM {table}'
+                    ).fetchone()[0]
+                    if count < 1:
+                        raise ValueError(
+                            f'Empty Plex database table: {table}'
+                        )
+
+                tables = {
+                    row[0] for row in db.execute(
+                        "SELECT name FROM sqlite_master "
+                        "WHERE type='table'"
+                    )
+                }
+
+                if not {
+                    'library_sections',
+                    'metadata_items',
+                    'media_items',
+                    'media_parts'
+                }.issubset(tables):
+                    continue
+
+                libraries = db.execute(
+                    'SELECT COUNT(*) FROM library_sections'
+                ).fetchone()[0]
+
+                if libraries < 1:
+                    continue
+
+            after = os.stat(path)
+
+            # Reject a file that changed during validation.
+            if (
+                before.st_size != after.st_size
+                or before.st_mtime_ns != after.st_mtime_ns
+            ):
+                continue
+
+            return path
+
+        except (sqlite3.Error, OSError):
+            continue
+
+    raise RuntimeError(
+        f"No valid Plex library backup found in {backup_dir}"
+    )
 
 def plex():
     db_path=get_db_path()
@@ -87,12 +198,14 @@ def config():
     c.execute('create index if not exists idx_tautulli_history_item on tautulli_history(kind,item_id)')
     c.execute('create table if not exists arr_matches(kind text,item_id integer,arr_id integer,title_slug text,arr_title text,arr_path text,matched_by text,synced_at text default current_timestamp,primary key(kind,item_id))')
     c.commit(); return c
+
 def source_conn(path=None):
-    db_path=path or get_db_path()
-    uri='file:'+db_path.replace('\\','/')+'?mode=ro'
-    c=sqlite3.connect(uri,uri=True); c.row_factory=sqlite3.Row; return c
-
-
+    db_path = path or get_db_path()
+    from pathlib import Path
+    uri = Path(db_path).resolve().as_uri() + '?mode=ro&immutable=1'
+    c = sqlite3.connect(uri, uri=True)
+    c.row_factory = sqlite3.Row
+    return c
 
 def setting(key, default=''):
     c=config(); r=c.execute('select value from settings where key=?',(key,)).fetchone(); c.close()
@@ -195,7 +308,7 @@ def _plex_account_has_server_access(token):
                 return True, ''
         return False, 'This Plex account does not have access to this Plex server.'
     except Exception as e:
-        return False, 'MyCouch could not verify access to this Plex server ('+type(e).__name__+').' 
+        return False, 'MyCouch could not verify access to this Plex server ('+type(e).__name__+').'
 
 def sort_url(column):
     args=request.args.to_dict(flat=True)
@@ -655,7 +768,11 @@ def _scheduler_loop():
                 elif freq=='6h': due=now.minute==0 and now.hour%6==0
                 elif freq=='12h': due=now.minute==0 and now.hour%12==0
                 if due and setting('plex_last_schedule_stamp','')!=stamp:
-                    set_setting('plex_last_schedule_stamp',stamp); threading.Thread(target=refresh_worker,daemon=True).start()
+                    set_setting('plex_last_schedule_stamp', stamp)
+                    threading.Thread(
+                        target=scheduled_plex_refresh_worker,
+                        daemon=True
+                    ).start()
         except Exception: pass
         time.sleep(30)
 
@@ -1292,21 +1409,59 @@ def _remove_snapshot_family(snapshot):
             pass
 
 def refresh_cache():
-    source=get_db_path(); workdir=DATA_DIR
-    fd,snapshot=tempfile.mkstemp(prefix='plex-snapshot-',suffix='.db',dir=workdir); os.close(fd)
-    build=CACHE_DB+'.building'
-    started=time.time()
-    set_build_status(running=True,complete=False,error=None,stage='Copying Plex database',percent=2,current=0,total=0,message='Creating a safe snapshot of the selected Plex database…',started_at=started)
+    workdir = DATA_DIR
+    build = CACHE_DB + '.building'
+    snapshot = None
+    started = time.time()
+
+    set_build_status(
+        running=True,
+        complete=False,
+        error=None,
+        stage='Finding Plex backup',
+        percent=2,
+        current=0,
+        total=0,
+        message='Locating the newest valid Plex database...',
+        started_at=started
+    )
+
     try:
-        # SQLite online backup gives a consistent snapshot even when the live Plex DB is open.
+        # Select a validated backup, or use the manually configured DB.
+        if os.environ.get('PLEX_BACKUP_DIR', '').strip():
+            source = discover_plex_backup()
+        else:
+            source = get_db_path()
+
+        fd, snapshot = tempfile.mkstemp(
+            prefix='plex-snapshot-',
+            suffix='.db',
+            dir=workdir
+        )
+        os.close(fd)
+
+        set_build_status(
+            stage='Copying Plex database',
+            percent=5,
+            message='Creating a snapshot of the selected Plex database...'
+        )
+
+        # Create a consistent snapshot from a completed Plex backup.
+        src_live = None
+        snap = None
         try:
-            src_live=sqlite3.connect('file:'+source.replace('\\','/')+'?mode=ro',uri=True,timeout=60)
-            snap=sqlite3.connect(snapshot)
+            src_live = sqlite3.connect(
+                'file:' + source.replace('\\', '/') + '?mode=ro&immutable=1',
+                uri=True,
+                timeout=60
+            )
+            snap = sqlite3.connect(snapshot)
             src_live.backup(snap)
-            snap.close(); src_live.close()
-        except Exception:
-            # Backup files/non-standard SQLite builds can still be copied safely as a fallback.
-            shutil.copy2(source,snapshot)
+        finally:
+            if snap is not None:
+                snap.close()
+            if src_live is not None:
+                src_live.close()
         set_build_status(stage='Opening database',percent=8,message='Opening safe local Plex snapshot read-only…')
         src=sqlite3.connect('file:'+snapshot.replace('\\','/')+'?mode=ro',uri=True); src.row_factory=sqlite3.Row
         if os.path.exists(build): os.remove(build)
@@ -1366,11 +1521,65 @@ def refresh_cache():
         set_build_status(running=False,complete=False,stage='Failed',error=str(e),message=str(e),elapsed=round(time.time()-started,1))
         raise
     finally:
-        _remove_snapshot_family(snapshot)
+        if snapshot is not None:
+            _remove_snapshot_family(snapshot)
         for f in (build, build+'-wal', build+'-shm'):
             try:
                 if os.path.exists(f): os.remove(f)
             except OSError: pass
+
+def plex_backup_update_needed():
+    """Check whether a newer Plex backup needs caching."""
+    if not os.environ.get('PLEX_BACKUP_DIR', '').strip():
+        return True
+
+    latest = discover_plex_backup()
+
+    if not os.path.exists(CACHE_DB):
+        return True
+
+    conn = sqlite3.connect(
+        'file:' + CACHE_DB + '?mode=ro',
+        uri=True
+    )
+    try:
+        row = conn.execute(
+            "SELECT value FROM cache_meta WHERE key='source_db'"
+        ).fetchone()
+        previous = row[0] if row else None
+    finally:
+        conn.close()
+
+    return latest != previous
+
+def scheduled_plex_refresh_worker():
+    """Refresh only when the NAS has a newer Plex backup."""
+    if not BUILD_LOCK.acquire(blocking=False):
+        return
+
+    try:
+        if not plex_backup_update_needed():
+            print('Scheduled Plex refresh skipped: backup unchanged.', flush=True)
+            return
+
+        refresh_cache()
+
+        try:
+            _sync_all_smart_playlists()
+        except Exception as e:
+            print('Smart playlist sync after cache refresh failed:', e, flush=True)
+
+    except Exception as e:
+        print('Scheduled Plex refresh failed:', e, flush=True)
+        set_build_status(
+            running=False,
+            complete=False,
+            stage='Failed',
+            error=str(e),
+            message=str(e)
+        )
+    finally:
+        BUILD_LOCK.release()
 
 def refresh_worker():
     if not BUILD_LOCK.acquire(blocking=False): return
@@ -2617,6 +2826,47 @@ def refresh_cache_route():
     threading.Thread(target=refresh_worker,daemon=True).start()
     return redirect(url_for('settings',building='1'))
 
+@app.get('/api/plex-backup-status')
+def plex_backup_status():
+    """Report the latest NAS backup without modifying the cache."""
+    meta = cache_meta()
+    cached_source = meta.get('source_db', '')
+    backup_dir = os.environ.get('PLEX_BACKUP_DIR', '').strip()
+
+    result = {
+        'status': 'unknown',
+        'cached_backup': os.path.basename(cached_source),
+        'last_refreshed': meta.get('refreshed_at'),
+        'latest_backup': None,
+        'message': ''
+    }
+
+    if not backup_dir:
+        result['status'] = 'manual'
+        result['message'] = 'Manual Plex database mode'
+        return jsonify(result)
+
+    try:
+        latest = discover_plex_backup()
+        result['latest_backup'] = os.path.basename(latest)
+
+        if not cached_source:
+            result['status'] = 'update_available'
+            result['message'] = 'Library cache needs building'
+        elif latest == cached_source:
+            result['status'] = 'current'
+            result['message'] = 'Up to date'
+        else:
+            result['status'] = 'update_available'
+            result['message'] = 'New backup available'
+
+    except Exception as e:
+        result['status'] = 'unavailable'
+        result['message'] = 'NAS backup unavailable'
+        result['error'] = str(e)
+
+    return jsonify(result)
+
 @app.get('/api/cache-status')
 def cache_status_route():
     if BUILD_STATUS.get('started_at') and BUILD_STATUS.get('running'):
@@ -2885,6 +3135,7 @@ def leaving_soon_settings():
 @app.get('/changelog')
 def changelog():
     versions = [
+        ('v2.9.21', 'Automatic Plex Backup Management: automatically discovers the newest valid Plex database backup from a configured NAS directory, safely builds the local library cache from a read-only SQLite snapshot, and skips scheduled refreshes when the backup is unchanged. Failed refreshes preserve the existing cache. Admin Settings now displays the selected backup filename, last successful refresh and live backup status. Added Waitress production serving and portable Docker Compose configuration.'),
         ('v2.9.20', 'File Processing: read-only FileFlows processing, processed totals, problems and reported space savings; refreshed Services dashboard with status cards and icons; interface and encoding fixes.'),
         ('v2.9.19.2', 'Services: Uptime Kuma status and response-time dashboard, settings connection test, periodic refresh and reorganised navigation.'),
         ('v2.9.19.1', 'Smart Search can now create named Smart Playlists and optionally sync them to Plex. Synced Smart Lists automatically reconcile after Plex cache refreshes, with Sync Now and Stop Syncing controls.'),
@@ -3011,7 +3262,7 @@ def settings():
         c=config(); c.execute("insert or replace into settings(key,value) values('plex_db',?)",(new_path,)); c.commit(); c.close()
         flash('Plex database changed. Click Refresh Library to rebuild the local cache.','success')
         return redirect(url_for('settings'))
-    c=config(); p=c.execute('select * from protected order by kind,title').fetchall(); c.close(); 
+    c=config(); p=c.execute('select * from protected order by kind,title').fetchall(); c.close();
     mc=config(); counts={r['kind']:r['n'] for r in mc.execute('select kind,count(*) n from arr_matches group by kind')}; mc.close()
     kuma={'url':setting('uptime_kuma_url','http://192.168.1.200:3001'),'key':bool(setting('uptime_kuma_api_key')),'hidden_ids':setting('uptime_kuma_hidden_monitor_ids','')}
     integrations={'radarr_url':setting('radarr_url','http://localhost:7878'),'sonarr_url':setting('sonarr_url','http://localhost:7879'),'radarr_key':bool(setting('radarr_api_key')),'sonarr_key':bool(setting('sonarr_api_key')),'movie_matches':counts.get('movie',0),'tv_matches':counts.get('tv',0)}
